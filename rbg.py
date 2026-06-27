@@ -258,3 +258,32 @@ def cmd_read(config, name, follow=False, runner=None, popen=None,
     res = runner(cmd)
     render_stream(res.stdout.splitlines(), out=out)
     return 0
+
+
+def cmd_ls(config, runner=None, out=None):
+    runner = runner or _default_runner
+    out = out or sys.stdout
+    ensure_reachable(config, runner=runner)
+    listing = runner(build_ssh_cmd(config, "claude agents --json --all"))
+    agents = parse_agents(listing.stdout)
+    by_id = {sid: name for name, sid in load_sessions().items()}
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        session_id = next((agent[k] for k in ID_KEYS if agent.get(k)), "?")
+        local = by_id.get(session_id, "")
+        name = agent.get("name", "?")
+        print(f"{name}\t{session_id}\t{local}".rstrip(), file=out)
+    return 0
+
+
+def cmd_attach(config, name, runner=None, sessions=None):
+    runner = runner or _default_runner
+    ensure_reachable(config, runner=runner)
+    sessions = load_sessions() if sessions is None else sessions
+    session_id = sessions.get(name)
+    if not session_id:
+        print(f"rbg: unknown agent '{name}'", file=sys.stderr)
+        return 1
+    cmd = build_ssh_cmd(config, remote_attach_cmd(config.cwd, session_id), tty=True)
+    return runner(cmd).returncode
