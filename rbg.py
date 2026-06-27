@@ -186,3 +186,31 @@ def remote_read_cmd(session_id, follow=False):
 
 def remote_attach_cmd(cwd, session_id):
     return f"{_cd_prefix(cwd)}claude --resume {shlex.quote(session_id)}"
+
+
+def cmd_ping(config, runner=None):
+    if check_reachable(config, runner=runner):
+        print(f"{config.host}: reachable")
+        return 0
+    print(f"cannot reach '{config.host}' — disconnected", file=sys.stderr)
+    return 1
+
+
+def cmd_launch(config, name, task, runner=None, sessions=None, save=None):
+    runner = runner or _default_runner
+    ensure_reachable(config, runner=runner)
+    runner(build_ssh_cmd(config, remote_launch_cmd(config.cwd, name, task)))
+    listing = runner(build_ssh_cmd(config, "claude agents --json --all"))
+    session_id = find_agent_id(parse_agents(listing.stdout), name)
+    if not session_id:
+        print(
+            f"rbg: launched '{name}' but could not resolve its id from "
+            "'claude agents --json --all'",
+            file=sys.stderr,
+        )
+        return 1
+    sessions = load_sessions() if sessions is None else sessions
+    sessions[name] = session_id
+    (save or save_sessions)(sessions)
+    print(f"launched {name} ({session_id})")
+    return 0
