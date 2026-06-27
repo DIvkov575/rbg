@@ -116,3 +116,42 @@ def find_agent_id(agents, name):
                 if agent.get(key):
                     return agent[key]
     return None
+
+
+def render_line(line):
+    line = line.strip()
+    if not line:
+        return None
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    message = obj.get("message") or {}
+    content = message.get("content")
+    parts = []
+    if isinstance(content, str):
+        parts.append(content)
+    elif isinstance(content, list):
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "text":
+                parts.append(block.get("text", ""))
+            elif btype == "tool_use":
+                parts.append(f"[tool: {block.get('name', '?')}]")
+            elif btype == "tool_result":
+                parts.append("[tool result]")
+    text = "\n".join(p for p in parts if p)
+    if not text:
+        return None
+    role = message.get("role") or obj.get("type") or "?"
+    return f"{role}: {text}"
+
+
+def render_stream(lines, out=None):
+    out = out or sys.stdout
+    for line in lines:
+        rendered = render_line(line)
+        if rendered is not None:
+            print(rendered, file=out)
