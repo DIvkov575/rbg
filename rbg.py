@@ -214,3 +214,21 @@ def cmd_launch(config, name, task, runner=None, sessions=None, save=None):
     (save or save_sessions)(sessions)
     print(f"launched {name} ({session_id})")
     return 0
+
+
+def cmd_send(config, name, task, runner=None, sessions=None):
+    runner = runner or _default_runner
+    ensure_reachable(config, runner=runner)
+    sessions = load_sessions() if sessions is None else sessions
+    session_id = sessions.get(name)
+    if not session_id:
+        print(f"rbg: unknown agent '{name}'", file=sys.stderr)
+        return 1
+    res = runner(
+        build_ssh_cmd(config, remote_send_cmd(config.cwd, name, session_id, task))
+    )
+    if res.returncode == 3:
+        print(f"rbg: session '{name}' busy — a send is already running", file=sys.stderr)
+        return 3
+    print(f"sent to {name}")
+    return 0
