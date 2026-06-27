@@ -287,3 +287,59 @@ def cmd_attach(config, name, runner=None, sessions=None):
         return 1
     cmd = build_ssh_cmd(config, remote_attach_cmd(config.cwd, session_id), tty=True)
     return runner(cmd).returncode
+
+
+def build_parser():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="rbg", description="Manage remote Claude --bg agents from the laptop."
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("launch", help="start a named --bg agent on the desktop")
+    p.add_argument("name")
+    p.add_argument("task")
+
+    p = sub.add_parser("send", help="send a follow-up task to an ongoing session")
+    p.add_argument("name")
+    p.add_argument("task")
+
+    p = sub.add_parser("read", help="replay or follow an agent's transcript")
+    p.add_argument("name")
+    p.add_argument("-f", "--follow", action="store_true", help="stream live")
+
+    sub.add_parser("ls", help="list remote agents")
+
+    p = sub.add_parser("attach", help="attach interactively over a tty")
+    p.add_argument("name")
+
+    sub.add_parser("ping", help="check desktop reachability")
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    try:
+        config = load_config()
+    except ConfigError as e:
+        print(f"rbg: {e}", file=sys.stderr)
+        return 2
+
+    if args.cmd == "ping":
+        return cmd_ping(config)
+    if args.cmd == "launch":
+        return cmd_launch(config, args.name, args.task)
+    if args.cmd == "send":
+        return cmd_send(config, args.name, args.task)
+    if args.cmd == "read":
+        return cmd_read(config, args.name, follow=args.follow)
+    if args.cmd == "ls":
+        return cmd_ls(config)
+    if args.cmd == "attach":
+        return cmd_attach(config, args.name)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
