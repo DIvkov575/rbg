@@ -1,3 +1,4 @@
+import pytest
 import rbg
 
 
@@ -33,6 +34,12 @@ def test_read_cmd_replay_and_follow():
     assert rbg.remote_read_cmd("sid-1", follow=True) == (
         "tail -f -n +1 ~/.claude/projects/*/sid-1.jsonl 2>/dev/null"
     )
+
+
+def test_read_cmd_rejects_unsafe_session_id():
+    for bad in ["../etc/passwd", "a b", "id;rm -rf /", "id*", "id$x", ""]:
+        with pytest.raises(ValueError):
+            rbg.remote_read_cmd(bad, follow=False)
 
 
 def test_attach_cmd():

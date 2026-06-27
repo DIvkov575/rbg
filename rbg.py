@@ -2,6 +2,7 @@
 """rbg — manage remote Claude --bg agents from the laptop."""
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -180,6 +181,8 @@ def remote_send_cmd(cwd, name, session_id, task):
 
 
 def remote_read_cmd(session_id, follow=False):
+    if not re.fullmatch(r"[A-Za-z0-9-]+", session_id or ""):
+        raise ValueError(f"unsafe session id: {session_id!r}")
     flag = "-f " if follow else ""
     return f"tail {flag}-n +1 ~/.claude/projects/*/{session_id}.jsonl 2>/dev/null"
 
