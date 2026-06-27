@@ -232,3 +232,29 @@ def cmd_send(config, name, task, runner=None, sessions=None):
         return 3
     print(f"sent to {name}")
     return 0
+
+
+def cmd_read(config, name, follow=False, runner=None, popen=None,
+             sessions=None, out=None):
+    runner = runner or _default_runner
+    out = out or sys.stdout
+    ensure_reachable(config, runner=runner)
+    sessions = load_sessions() if sessions is None else sessions
+    session_id = sessions.get(name)
+    if not session_id:
+        print(f"rbg: unknown agent '{name}'", file=sys.stderr)
+        return 1
+    cmd = build_ssh_cmd(config, remote_read_cmd(session_id, follow=follow))
+    if follow:
+        popen = popen or (
+            lambda c: subprocess.Popen(c, stdout=subprocess.PIPE, text=True)
+        )
+        proc = popen(cmd)
+        try:
+            render_stream(proc.stdout, out=out)
+        except KeyboardInterrupt:
+            pass  # Ctrl-C stops the local tail only; remote task untouched
+        return 0
+    res = runner(cmd)
+    render_stream(res.stdout.splitlines(), out=out)
+    return 0
