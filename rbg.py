@@ -155,3 +155,34 @@ def render_stream(lines, out=None):
         rendered = render_line(line)
         if rendered is not None:
             print(rendered, file=out)
+
+
+def _cd_prefix(cwd):
+    return f"cd {shlex.quote(cwd)} && " if cwd else ""
+
+
+def remote_launch_cmd(cwd, name, task):
+    return f"{_cd_prefix(cwd)}claude --bg -n {shlex.quote(name)} {shlex.quote(task)}"
+
+
+def remote_send_cmd(cwd, name, session_id, task):
+    inner = (
+        f"{_cd_prefix(cwd)}claude -p {shlex.quote(task)} "
+        f"--resume {shlex.quote(session_id)} --output-format stream-json"
+    )
+    win = shlex.quote(name)
+    return (
+        "tmux has-session -t rbg 2>/dev/null || tmux new-session -d -s rbg; "
+        f"if tmux list-windows -t rbg -F '#W' 2>/dev/null | grep -qx {win}; "
+        "then echo 'rbg: busy' >&2; exit 3; fi; "
+        f"tmux new-window -t rbg -n {win} {shlex.quote(inner)}"
+    )
+
+
+def remote_read_cmd(session_id, follow=False):
+    flag = "-f " if follow else ""
+    return f"tail {flag}-n +1 ~/.claude/projects/*/{session_id}.jsonl 2>/dev/null"
+
+
+def remote_attach_cmd(cwd, session_id):
+    return f"{_cd_prefix(cwd)}claude --resume {shlex.quote(session_id)}"
