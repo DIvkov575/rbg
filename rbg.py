@@ -74,3 +74,23 @@ def ensure_reachable(config, runner=None):
     if not check_reachable(config, runner=runner):
         print(f"cannot reach '{config.host}' — disconnected", file=sys.stderr)
         sys.exit(1)
+
+
+def sessions_path():
+    return os.path.expanduser("~/.rbg/sessions.json")
+
+
+def load_sessions(path=None):
+    path = path or sessions_path()
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_sessions(sessions, path=None):
+    path = path or sessions_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(sessions, f, indent=2)
