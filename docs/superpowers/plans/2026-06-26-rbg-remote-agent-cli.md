@@ -724,7 +724,10 @@ def test_send_cmd_structure():
     assert "list-windows -t rbg" in cmd
     assert "exit 3" in cmd
     assert "new-window -t rbg -n alpha" in cmd
-    assert "claude -p 'next step' --resume sid-1 --output-format stream-json" in cmd
+    # the inner claude command is shlex.quote'd as a single tmux argument, so the
+    # task's own quoting is escaped; assert on the parts that survive intact
+    assert "claude -p " in cmd
+    assert "--resume sid-1 --output-format stream-json" in cmd
     assert "cd /proj" in cmd
 
 
@@ -777,6 +780,8 @@ def remote_send_cmd(cwd, name, session_id, task):
 
 
 def remote_read_cmd(session_id, follow=False):
+    if not re.fullmatch(r"[A-Za-z0-9-]+", session_id or ""):
+        raise ValueError(f"unsafe session id: {session_id!r}")
     flag = "-f " if follow else ""
     return f"tail {flag}-n +1 ~/.claude/projects/*/{session_id}.jsonl 2>/dev/null"
 
@@ -785,7 +790,7 @@ def remote_attach_cmd(cwd, session_id):
     return f"{_cd_prefix(cwd)}claude --resume {shlex.quote(session_id)}"
 ```
 
-Note: `remote_read_cmd` interpolates `session_id` directly because session ids resolved from `claude` are UUID-like (`[A-Za-z0-9-]`) and embedding inside the glob path must stay literal. If you ever accept arbitrary ids, validate against `^[A-Za-z0-9-]+$` here.
+Note: `remote_read_cmd` must embed `session_id` literally inside the glob path (it can't be `shlex.quote`d like other args, or the glob wouldn't expand), so it instead validates against `^[A-Za-z0-9-]+$` and raises `ValueError` on anything else. The id originates from `~/.rbg/sessions.json`, a user-editable file, so this guard prevents shell injection via a hand-edited id. Add `import re` to the top imports for this.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -959,7 +964,12 @@ def test_send_unknown_agent(capsys):
 
 
 def test_send_busy_session(capsys):
-    runner = RecordingRunner(default=result(returncode=3))
+    # Only the tmux send command returns 3; the reachability `true` probe must
+    # return 0 (default) or ensure_reachable would exit 1 before the busy check.
+    runner = RecordingRunner(
+        by_substring={"new-window": result(returncode=3)},
+        default=result(returncode=0),
+    )
     rc = rbg.cmd_send(cfg(), "alpha", "x", runner=runner,
                       sessions={"alpha": "sid-1"})
     assert rc == 3
