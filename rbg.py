@@ -94,3 +94,25 @@ def save_sessions(sessions, path=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         json.dump(sessions, f, indent=2)
+
+
+ID_KEYS = ("sessionId", "session_id", "id")
+
+
+def parse_agents(text):
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(data, dict):
+        data = data.get("agents", [])
+    return data if isinstance(data, list) else []
+
+
+def find_agent_id(agents, name):
+    for agent in agents:
+        if isinstance(agent, dict) and agent.get("name") == name:
+            for key in ID_KEYS:
+                if agent.get(key):
+                    return agent[key]
+    return None
