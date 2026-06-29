@@ -15,6 +15,7 @@ import (
 
 	"github.com/divkov575/rbg/internal/claudecli"
 	"github.com/divkov575/rbg/internal/render"
+	"github.com/divkov575/rbg/internal/slug"
 	"github.com/divkov575/rbg/internal/run"
 	"github.com/divkov575/rbg/internal/session"
 )
@@ -40,6 +41,24 @@ const claudeBin = "claude"
 // agent owns this mapping, so no glob is ever needed.
 func (a *Agent) transcriptPath(claudeSessionID string) string {
 	return filepath.Join(a.ClaudeHome, ".claude", "projects", "sim-project", claudeSessionID+".jsonl")
+}
+
+// resolveName picks the agent's id: the explicit name if given, else a slug of
+// the task; then dedups against the existing store by appending -2, -3, …
+func resolveName(store *session.Store, explicit, task string) string {
+	base := explicit
+	if base == "" {
+		base = slug.FromTask(task)
+	}
+	if _, taken := store.Get(base); !taken {
+		return base
+	}
+	for i := 2; ; i++ {
+		cand := fmt.Sprintf("%s-%d", base, i)
+		if _, taken := store.Get(cand); !taken {
+			return cand
+		}
+	}
 }
 
 // Launch starts a --bg claude agent, resolves its session id, records it, and
