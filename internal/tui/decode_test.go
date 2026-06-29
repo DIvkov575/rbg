@@ -17,6 +17,7 @@ func TestDecodeKey(t *testing.T) {
 		{[]byte("r"), KeyRefresh},
 		{[]byte("q"), KeyQuit},
 		{[]byte("\x03"), KeyQuit}, // Ctrl-C
+		{[]byte("\x1b"), KeyNone}, // bare ESC (len 1) is not a binding
 		{[]byte("x"), KeyNone},
 	}
 	for _, c := range cases {

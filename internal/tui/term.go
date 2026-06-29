@@ -8,6 +8,10 @@ import (
 
 // decodeKey maps a raw input chunk to an abstract Key. Arrow keys arrive as the
 // 3-byte escape sequences ESC [ A/B; we also accept vi-style and letter keys.
+//
+// Assumption: in raw mode (VMIN=1, VTIME=0) the terminal delivers a full arrow
+// escape in a single read, so b holds all 3 bytes at once. A bare ESC (len 1,
+// just 0x1b) is not a recognized binding and falls through to KeyNone below.
 func decodeKey(b []byte) Key {
 	if len(b) == 0 {
 		return KeyNone
