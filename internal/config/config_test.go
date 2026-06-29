@@ -49,7 +49,7 @@ func TestMissingHostErrors(t *testing.T) {
 func TestAgentPathDefault(t *testing.T) {
 	conf := writeConf(t, "RBG_HOST=h\n")
 	cfg, _ := Load(map[string]string{}, conf)
-	if cfg.AgentPath != "~/.local/bin/rbg-agent" {
+	if cfg.AgentPath != ".local/bin/rbg-agent" {
 		t.Errorf("AgentPath = %q, want default", cfg.AgentPath)
 	}
 }

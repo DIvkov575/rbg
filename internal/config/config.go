@@ -17,7 +17,7 @@ type Config struct {
 	AgentPath string
 }
 
-const defaultAgentPath = "~/.local/bin/rbg-agent"
+const defaultAgentPath = ".local/bin/rbg-agent"
 
 // Load merges env over the conf file at confPath. Pass os.Environ-derived map
 // for env; a missing file is not an error (only a missing RBG_HOST is).

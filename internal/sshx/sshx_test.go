@@ -2,6 +2,7 @@ package sshx
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/divkov575/rbg/internal/config"
@@ -86,5 +87,21 @@ func TestAgentArgs_NoCDWhenEmpty(t *testing.T) {
 	want := []string{"rbg-agent", "ls"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v want %v", got, want)
+	}
+}
+
+// Regression: the default agent path must not rely on '~' expansion, because
+// RemoteCommand single-quotes every token and the remote shell will NOT expand
+// a tilde inside single quotes. A relative path (resolved from the SSH-default
+// $HOME) survives quoting intact. See real-host bug: quoted '~/...' → exit 127.
+func TestRemoteCommand_AgentPathHasNoTilde(t *testing.T) {
+	c := &config.Config{Host: "desk", AgentPath: ".local/bin/rbg-agent"}
+	remote := AgentArgs(c, "ls", nil)
+	cmd := RemoteCommand(remote)
+	if strings.Contains(cmd, "~") {
+		t.Fatalf("remote command must not contain '~' (won't expand when quoted): %q", cmd)
+	}
+	if !strings.Contains(cmd, "'.local/bin/rbg-agent'") {
+		t.Fatalf("agent path should be quoted as a relative path: %q", cmd)
 	}
 }
