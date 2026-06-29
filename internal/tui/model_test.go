@@ -48,7 +48,7 @@ func TestViewLoadsTranscriptIntoPane(t *testing.T) {
 	}
 }
 
-func TestAttackKeyYieldsAttachAction(t *testing.T) {
+func TestAttachKeyYieldsAttachAction(t *testing.T) {
 	m := sample()
 	m, _ = Update(m, KeyDown) // select beta
 	_, act := Update(m, KeyAttach)
