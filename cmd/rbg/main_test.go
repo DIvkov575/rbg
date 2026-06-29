@@ -45,3 +45,13 @@ func TestParse_AttachAndDeploy(t *testing.T) {
 		t.Fatalf("deploy: %+v %v", inv, err)
 	}
 }
+
+func TestClaudeSessionIDFor(t *testing.T) {
+	ls := []byte(`[{"name":"alpha","claudeSessionId":"sid-a"},{"name":"beta","claudeSessionId":"sid-b"}]`)
+	if got := claudeSessionIDFor(ls, "beta"); got != "sid-b" {
+		t.Errorf("got %q want sid-b", got)
+	}
+	if got := claudeSessionIDFor(ls, "ghost"); got != "" {
+		t.Errorf("ghost should be empty, got %q", got)
+	}
+}

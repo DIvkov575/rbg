@@ -91,8 +91,6 @@ func attach(cfg *config.Config, r run.Runner, name string) int {
 	// For attach we shell out to ssh -t directly so the user gets the real tty;
 	// we pass claude --resume with the recorded id. Resolve id via agent ls.
 	body, code := func() ([]byte, int) {
-		remote := sshx.AgentArgs(cfg, "read", []string{"--id", name})
-		_ = remote
 		out, c, _ := r.Run("ssh", sshx.BuildSSHArgs(cfg, sshx.AgentArgs(cfg, "ls", nil), sshx.Options{}), nil)
 		return out, c
 	}()
