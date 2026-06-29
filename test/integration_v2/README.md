@@ -30,6 +30,8 @@ Skips automatically without `go` or `/usr/sbin/sshd`.
 - `fake_claude.py` — stand-in `claude` (launch / agents --json / resume-headless
   / resume-interactive), rooted at `$HOME`, transcript slug `sim-project` to
   match the agent's `transcriptPath`.
-- `sshd_harness.py` — `SimDesktop`: boots/stops the sandboxed sshd, installs the
-  prebuilt `rbg-agent` into its PATH, exposes `rbg_env()`. No tmux.
+- `v2_harness.py` — `SimDesktop`: boots/stops the sandboxed sshd, installs the
+  prebuilt `rbg-agent` into its PATH, exposes `rbg_env()`. No tmux. (Named
+  distinctly from v1's `sshd_harness.py` so the two suites can be collected
+  together without a `sys.modules` clash.)
 - `test_integration_v2.py` — the tests; build the binaries, drive them over SSH.

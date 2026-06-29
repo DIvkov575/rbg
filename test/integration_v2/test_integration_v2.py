@@ -18,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
 
 sys.path.insert(0, HERE)
-from sshd_harness import SimDesktop, SSHD_BIN  # noqa: E402
+from v2_harness import SimDesktop, SSHD_BIN  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
