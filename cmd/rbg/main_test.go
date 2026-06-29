@@ -55,3 +55,13 @@ func TestClaudeSessionIDFor(t *testing.T) {
 		t.Errorf("ghost should be empty, got %q", got)
 	}
 }
+
+func TestParse_LaunchTaskOnly(t *testing.T) {
+	in, err := parse([]string{"launch", "do the thing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.verb != "launch" || in.name != "" || in.task != "do the thing" {
+		t.Fatalf("inv = %+v", in)
+	}
+}

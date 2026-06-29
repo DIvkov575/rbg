@@ -42,10 +42,10 @@ func parseArgs(args []string) (*invocation, error) {
 	case "ls", "ping", "version":
 		return inv, nil
 	case "launch":
-		inv.Name = flagValue(rest, "--name")
+		inv.Name = flagValue(rest, "--name") // optional now
 		inv.Task = flagValue(rest, "--task")
-		if inv.Name == "" || inv.Task == "" {
-			return nil, errors.New("launch requires --name and --task")
+		if inv.Task == "" {
+			return nil, errors.New("launch requires --task")
 		}
 	case "send":
 		inv.Name = flagValue(rest, "--id")

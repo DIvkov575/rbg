@@ -28,9 +28,18 @@ func parse(args []string) (*inv, error) {
 	switch in.verb {
 	case "ls", "ping", "deploy":
 		return in, nil
-	case "launch", "send":
+	case "launch":
+		switch len(rest) {
+		case 1:
+			in.task = rest[0] // name auto-derived by the agent
+		case 2:
+			in.name, in.task = rest[0], rest[1]
+		default:
+			return nil, fmt.Errorf("launch requires \"<task>\" or <name> \"<task>\"")
+		}
+	case "send":
 		if len(rest) < 2 {
-			return nil, fmt.Errorf("%s requires <name> <task>", in.verb)
+			return nil, fmt.Errorf("send requires <name> <task>")
 		}
 		in.name, in.task = rest[0], rest[1]
 	case "read":

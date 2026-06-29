@@ -64,25 +64,27 @@ func resolveName(store *session.Store, explicit, task string) string {
 // Launch starts a --bg claude agent, resolves its session id, records it, and
 // prints {"id","claudeSessionId"} as JSON.
 func (a *Agent) Launch(out io.Writer, name, task string) int {
-	_, code, _ := a.Runner.Run(claudeBin, claudecli.BGArgs(name, task), nil)
+	store, err := session.Load(a.StatePath)
+	if err != nil {
+		fmt.Fprintf(out, "rbg-agent: %v\n", err)
+		return 1
+	}
+	resolved := resolveName(store, name, task)
+
+	_, code, _ := a.Runner.Run(claudeBin, claudecli.BGArgs(resolved, task), nil)
 	if code != 0 {
 		fmt.Fprintf(out, "rbg-agent: claude --bg failed (exit %d)\n", code)
 		return 1
 	}
 	listing, _, _ := a.Runner.Run(claudeBin, claudecli.AgentsListArgs(), nil)
 	agents, _ := claudecli.ParseAgents(listing)
-	sid := claudecli.FindSessionID(agents, name)
+	sid := claudecli.FindSessionID(agents, resolved)
 	if sid == "" {
-		fmt.Fprintf(out, "rbg-agent: could not resolve session id for %q\n", name)
-		return 1
-	}
-	store, err := session.Load(a.StatePath)
-	if err != nil {
-		fmt.Fprintf(out, "rbg-agent: %v\n", err)
+		fmt.Fprintf(out, "rbg-agent: could not resolve session id for %q\n", resolved)
 		return 1
 	}
 	store.Add(session.Session{
-		Name:            name,
+		Name:            resolved,
 		ClaudeSessionID: sid,
 		TranscriptPath:  a.transcriptPath(sid),
 		StartedAt:       a.Now(),
@@ -91,7 +93,7 @@ func (a *Agent) Launch(out io.Writer, name, task string) int {
 		fmt.Fprintf(out, "rbg-agent: %v\n", err)
 		return 1
 	}
-	json.NewEncoder(out).Encode(map[string]string{"id": name, "claudeSessionId": sid})
+	json.NewEncoder(out).Encode(map[string]string{"id": resolved, "claudeSessionId": sid})
 	return 0
 }
 

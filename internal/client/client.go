@@ -21,9 +21,14 @@ func runAgent(c *config.Config, r run.Runner, verb string, verbArgs []string) ([
 	return out, code
 }
 
-// Launch starts a named bg agent on the desktop and prints the agent's reply.
+// Launch starts a bg agent on the desktop and prints the agent's reply. If name
+// is empty the agent derives one from the task.
 func Launch(c *config.Config, r run.Runner, out io.Writer, name, task string) int {
-	body, code := runAgent(c, r, "launch", []string{"--name", name, "--task", task})
+	args := []string{"--task", task}
+	if name != "" {
+		args = append([]string{"--name", name}, args...)
+	}
+	body, code := runAgent(c, r, "launch", args)
 	out.Write(body)
 	return code
 }

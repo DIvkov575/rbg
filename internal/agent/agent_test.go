@@ -98,3 +98,20 @@ func TestLs_PrintsRecordedSessions(t *testing.T) {
 		t.Fatalf("want 2 sessions, got %d", len(list))
 	}
 }
+
+func TestLaunch_DerivesNameWhenEmpty(t *testing.T) {
+	r := &run.Recording{
+		BySubstring: map[string]run.Result{
+			"agents": {Stdout: []byte(`[{"name":"fix-flaky-test","sessionId":"sid-9"}]`)},
+		},
+		Default: run.Result{Code: 0},
+	}
+	a := newAgent(t, r)
+	var out bytes.Buffer
+	if code := a.Launch(&out, "", "fix the flaky test"); code != 0 {
+		t.Fatalf("Launch code=%d out=%s", code, out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("fix-flaky-test")) {
+		t.Fatalf("expected derived name in output: %s", out.String())
+	}
+}
