@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -110,3 +111,5 @@ func archFromUname(m string) string {
 	}
 	return ""
 }
+
+var errAttach = errors.New("attach failed")

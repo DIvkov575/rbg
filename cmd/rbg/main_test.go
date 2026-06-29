@@ -65,3 +65,17 @@ func TestParse_LaunchTaskOnly(t *testing.T) {
 		t.Fatalf("inv = %+v", in)
 	}
 }
+
+func TestParse_Dash(t *testing.T) {
+	in, err := parse([]string{"dash"})
+	if err != nil || in.verb != "dash" {
+		t.Fatalf("dash: inv=%+v err=%v", in, err)
+	}
+}
+
+func TestParse_NoArgsDefaultsToDash(t *testing.T) {
+	in, err := parse([]string{})
+	if err != nil || in.verb != "dash" {
+		t.Fatalf("no-args: inv=%+v err=%v", in, err)
+	}
+}

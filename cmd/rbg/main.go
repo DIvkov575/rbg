@@ -21,12 +21,12 @@ type inv struct {
 
 func parse(args []string) (*inv, error) {
 	if len(args) == 0 {
-		return nil, fmt.Errorf("usage: rbg <launch|send|read|ls|attach|ping|deploy> ...")
+		return &inv{verb: "dash"}, nil // no args → dashboard
 	}
 	in := &inv{verb: args[0]}
 	rest := args[1:]
 	switch in.verb {
-	case "ls", "ping", "deploy":
+	case "ls", "ping", "deploy", "dash":
 		return in, nil
 	case "launch":
 		switch len(rest) {
@@ -90,6 +90,8 @@ func main() {
 		os.Exit(attach(cfg, r, in.name))
 	case "deploy":
 		os.Exit(deploy(cfg, r))
+	case "dash":
+		os.Exit(dash(cfg, r))
 	}
 }
 
