@@ -26,7 +26,7 @@ func Run(d Deps, io Stdio) error {
 	if err != nil {
 		return err
 	}
-	defer restore()
+	defer func() { restore() }()
 
 	draw(io.Out, m)
 	for {
@@ -46,9 +46,15 @@ func Run(d Deps, io Stdio) error {
 			}
 		case ActionAttach:
 			name := m.SelectedName()
-			restore()                           // cooked mode for interactive claude
-			_ = d.Attach(name)                  // blocks until the user exits claude
-			restore, _ = rawMode(os.Stdin.Fd()) // back to raw
+			restore()          // cooked mode for interactive claude
+			_ = d.Attach(name) // blocks until the user exits claude
+			newRestore, rerr := rawMode(os.Stdin.Fd())
+			if rerr != nil {
+				// Can't resume raw mode; the terminal is already cooked (safe)
+				// from the restore() above, so exit rather than loop blind.
+				return rerr
+			}
+			restore = newRestore // back to raw; defer closure sees the new value
 		}
 		draw(io.Out, m)
 	}
