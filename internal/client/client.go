@@ -56,17 +56,15 @@ func Read(c *config.Config, r run.Runner, out io.Writer, name string) int {
 	return 0
 }
 
-// Ls prints the desktop's session list as JSON (one object per line is not
-// required; this preserves prior behavior by re-emitting the array).
+// Ls re-emits the session list as compact JSON, matching the agent's prior
+// output (preserving the existing rbg ls output contract).
 func Ls(c *config.Config, r run.Runner, out io.Writer) int {
 	sessions, err := FetchSessions(c, r)
 	if err != nil {
 		fmt.Fprintf(out, "rbg: %v\n", err)
 		return 1
 	}
-	enc := json.NewEncoder(out)
-	enc.SetIndent("", "  ")
-	enc.Encode(sessions)
+	json.NewEncoder(out).Encode(sessions)
 	return 0
 }
 
