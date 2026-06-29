@@ -71,4 +71,3 @@ func joinArgs(args []string) string { return strings.Join(args, " ") }
 
 var _ Runner = Exec{}
 var _ Runner = (*Recording)(nil)
-var _ = io.Discard

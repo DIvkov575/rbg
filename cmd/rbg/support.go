@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 
 	"github.com/divkov575/rbg/internal/config"
@@ -99,7 +98,6 @@ func deploy(cfg *config.Config, r run.Runner) int {
 		return 1
 	}
 	fmt.Printf("deployed rbg-agent (%s/%s) to %s\n", "linux", goarch, dest)
-	_ = runtime.GOOS
 	return 0
 }
 
@@ -112,5 +110,3 @@ func archFromUname(m string) string {
 	}
 	return ""
 }
-
-var _ = config.Config{}

@@ -23,7 +23,15 @@ the desktop** invoked with structured arguments.
 - **No persistent connection.** Each verb is one SSH round-trip: connect, run
   `rbg-agent <cmd> --flags`, receive JSON (or a stream), disconnect.
 - **No shell on the far end.** SSH executes the agent binary directly with an
-  argv; nothing is shell-interpolated, so injection is structurally impossible.
+  argv, structured as `rbg-agent <verb> --flags`, not ad-hoc shell logic.
+
+  **Caveat (corrected):** OpenSSH does *not* preserve argv — it joins the remote
+  command into one string that the desktop login shell re-parses (`$SHELL -c`).
+  So injection is NOT structurally impossible; the task string must still be
+  shell-quoted before it reaches ssh. The v2 win is that this quoting is confined
+  to a *single* transport chokepoint (`sshx.RemoteCommand`), instead of v1's
+  per-command `shlex.quote` scattered across tmux/tail/glob strings. The remote
+  side is a real program with verbs and JSON — that part is genuinely different.
 - **No runtime deps on the desktop**: no tmux, no flock, no jq, no Python. A
   single static Go binary, `scp`'d once.
 - Tasks survive laptop disconnect (detachment is done in-process, not by tmux).
