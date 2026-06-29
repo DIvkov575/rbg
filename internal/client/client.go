@@ -3,6 +3,7 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 
@@ -44,18 +45,29 @@ func Send(c *config.Config, r run.Runner, out io.Writer, name, task string) int 
 	return code
 }
 
-// Read prints the session transcript (already rendered by the agent).
+// Read prints the named agent's transcript (already rendered by the agent).
 func Read(c *config.Config, r run.Runner, out io.Writer, name string) int {
-	body, code := runAgent(c, r, "read", []string{"--id", name})
-	out.Write(body)
-	return code
+	text, err := FetchTranscript(c, r, name)
+	if err != nil {
+		fmt.Fprintf(out, "rbg: %v\n", err)
+		return 1
+	}
+	fmt.Fprint(out, text)
+	return 0
 }
 
-// Ls prints the desktop's session list.
+// Ls prints the desktop's session list as JSON (one object per line is not
+// required; this preserves prior behavior by re-emitting the array).
 func Ls(c *config.Config, r run.Runner, out io.Writer) int {
-	body, code := runAgent(c, r, "ls", nil)
-	out.Write(body)
-	return code
+	sessions, err := FetchSessions(c, r)
+	if err != nil {
+		fmt.Fprintf(out, "rbg: %v\n", err)
+		return 1
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	enc.Encode(sessions)
+	return 0
 }
 
 // Ping reports reachability using the gate only.
