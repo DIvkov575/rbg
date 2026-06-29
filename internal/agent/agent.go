@@ -45,7 +45,11 @@ func (a *Agent) transcriptPath(claudeSessionID string) string {
 // Launch starts a --bg claude agent, resolves its session id, records it, and
 // prints {"id","claudeSessionId"} as JSON.
 func (a *Agent) Launch(out io.Writer, name, task string) int {
-	a.Runner.Run(claudeBin, claudecli.BGArgs(name, task), nil)
+	_, code, _ := a.Runner.Run(claudeBin, claudecli.BGArgs(name, task), nil)
+	if code != 0 {
+		fmt.Fprintf(out, "rbg-agent: claude --bg failed (exit %d)\n", code)
+		return 1
+	}
 	listing, _, _ := a.Runner.Run(claudeBin, claudecli.AgentsListArgs(), nil)
 	agents, _ := claudecli.ParseAgents(listing)
 	sid := claudecli.FindSessionID(agents, name)

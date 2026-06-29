@@ -54,6 +54,28 @@ func TestLaunch_UnresolvedIDErrors(t *testing.T) {
 	}
 }
 
+func TestLaunch_BGFailureReported(t *testing.T) {
+	// agents-list WOULD resolve the id; only the --bg failure should abort.
+	r := &run.Recording{
+		BySubstring: map[string]run.Result{
+			"--bg":   {Code: 1},
+			"agents": {Stdout: []byte(`[{"name":"alpha","sessionId":"sid-1"}]`)},
+		},
+		Default: run.Result{Code: 0},
+	}
+	a := newAgent(t, r)
+	var out bytes.Buffer
+	if code := a.Launch(&out, "alpha", "x"); code != 1 {
+		t.Fatalf("expected 1 when --bg fails, got %d", code)
+	}
+	// must not record a session
+	var ls bytes.Buffer
+	a.Ls(&ls)
+	if !bytes.Contains(ls.Bytes(), []byte("[]")) {
+		t.Fatalf("expected no recorded session, ls = %s", ls.String())
+	}
+}
+
 func TestLs_PrintsRecordedSessions(t *testing.T) {
 	r := &run.Recording{Default: run.Result{Code: 0}}
 	a := newAgent(t, r)
