@@ -4,14 +4,13 @@ import "testing"
 
 func TestFromTask(t *testing.T) {
 	cases := map[string]string{
-		"fix the flaky payments test": "fix-flaky-payments-test",
+		"fix the flaky payments test":  "fix-flaky-payments-test",
 		"Refactor the Auth Module":     "refactor-auth-module",
 		"investigate a bug in setup()": "investigate-bug-setup",
 		"the a an to of":               "agent", // all stopwords → fallback
 		"":                             "agent",
 		"!!!  @@@":                     "agent", // no alnum → fallback
-		"a very long task description that keeps going and going forever":
-			"very-long-task-description", // capped at 4 words
+		"a very long task description that keeps going and going forever": "very-long-task-description", // capped at 4 words
 	}
 	for in, want := range cases {
 		if got := FromTask(in); got != want {

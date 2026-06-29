@@ -15,9 +15,9 @@ import (
 
 	"github.com/divkov575/rbg/internal/claudecli"
 	"github.com/divkov575/rbg/internal/render"
-	"github.com/divkov575/rbg/internal/slug"
 	"github.com/divkov575/rbg/internal/run"
 	"github.com/divkov575/rbg/internal/session"
+	"github.com/divkov575/rbg/internal/slug"
 )
 
 // SpawnFunc starts a detached child process whose stdout is redirected to
