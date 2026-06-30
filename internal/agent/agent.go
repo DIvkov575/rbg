@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -326,4 +327,87 @@ func DefaultSpawn(name string, args []string, stdoutPath, dir string) (int, erro
 	// Reap asynchronously so we don't block; the child is detached regardless.
 	go func() { _ = cmd.Wait(); f.Close() }()
 	return pid, nil
+}
+
+// dirEntry is one subdirectory in a Lsdir listing.
+type dirEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// dirListing is the JSON shape emitted by Lsdir: the resolved dir, its parent,
+// and the visible subdirectories within it (sorted, dotfiles skipped).
+type dirListing struct {
+	Dir     string     `json:"dir"`
+	Parent  string     `json:"parent"`
+	Entries []dirEntry `json:"entries"`
+}
+
+// resolveLsdirBase resolves the directory Lsdir should list: an empty dir means
+// the agent's LaunchDir if set, else the user's home; a relative dir resolves
+// against home; an absolute dir is used as-is.
+func (a *Agent) resolveLsdirBase(dir string) (string, error) {
+	home, herr := os.UserHomeDir()
+	if dir == "" {
+		if a.LaunchDir != "" {
+			return a.LaunchDir, nil
+		}
+		if herr != nil {
+			return "", herr
+		}
+		return home, nil
+	}
+	if filepath.IsAbs(dir) {
+		return dir, nil
+	}
+	if herr != nil {
+		return "", herr
+	}
+	return filepath.Join(home, dir), nil
+}
+
+// Lsdir lists the subdirectories of dir as JSON for the dashboard's directory
+// browser. Only directories are emitted (files skipped), dotfiles are skipped,
+// and entries are sorted by name. The parent dir is reported separately so the
+// browser can always navigate up. A read failure prints a JSON error object and
+// returns 1.
+func (a *Agent) Lsdir(out io.Writer, dir string) int {
+	base, err := a.resolveLsdirBase(dir)
+	if err != nil {
+		json.NewEncoder(out).Encode(map[string]string{"error": err.Error()})
+		return 1
+	}
+	abs, err := filepath.Abs(base)
+	if err != nil {
+		json.NewEncoder(out).Encode(map[string]string{"error": err.Error()})
+		return 1
+	}
+	ents, err := os.ReadDir(abs)
+	if err != nil {
+		json.NewEncoder(out).Encode(map[string]string{"error": err.Error()})
+		return 1
+	}
+	listing := dirListing{
+		Dir:     abs,
+		Parent:  filepath.Dir(abs),
+		Entries: []dirEntry{},
+	}
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		listing.Entries = append(listing.Entries, dirEntry{
+			Name: name,
+			Path: filepath.Join(abs, name),
+		})
+	}
+	sort.Slice(listing.Entries, func(i, j int) bool {
+		return listing.Entries[i].Name < listing.Entries[j].Name
+	})
+	json.NewEncoder(out).Encode(listing)
+	return 0
 }

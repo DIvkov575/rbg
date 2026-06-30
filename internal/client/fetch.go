@@ -31,3 +31,36 @@ func FetchTranscript(c *config.Config, r run.Runner, name string) (string, error
 	}
 	return string(body), nil
 }
+
+// DirEntry is one subdirectory returned by FetchDirs.
+type DirEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// DirListing is the parsed result of the agent's `lsdir` verb: the resolved
+// directory, its parent (for navigating up), and its visible subdirectories.
+type DirListing struct {
+	Dir     string     `json:"dir"`
+	Parent  string     `json:"parent"`
+	Entries []DirEntry `json:"entries"`
+}
+
+// FetchDirs lists the subdirectories of dir on the desktop via the agent's
+// `lsdir` verb. An empty dir lets the agent pick its default (LaunchDir or
+// home). A nonzero exit (including ssh 255) is reported as an error.
+func FetchDirs(c *config.Config, r run.Runner, dir string) (DirListing, error) {
+	var verbArgs []string
+	if dir != "" {
+		verbArgs = []string{"--dir", dir}
+	}
+	body, code := runAgent(c, r, "lsdir", verbArgs)
+	if code != 0 {
+		return DirListing{}, fmt.Errorf("lsdir failed (exit %d): %s", code, body)
+	}
+	var listing DirListing
+	if err := json.Unmarshal(body, &listing); err != nil {
+		return DirListing{}, fmt.Errorf("parse lsdir output: %w", err)
+	}
+	return listing, nil
+}

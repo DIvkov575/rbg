@@ -65,3 +65,32 @@ func TestKill_InvokesAgentKill(t *testing.T) {
 		t.Fatalf("kill call = %q", joined)
 	}
 }
+
+func TestFetchDirs_ParsesListing(t *testing.T) {
+	canned := `{"dir":"/home/u/proj","parent":"/home/u","entries":[{"name":"alpha","path":"/home/u/proj/alpha"},{"name":"beta","path":"/home/u/proj/beta"}]}`
+	r := &run.Recording{
+		BySubstring: map[string]run.Result{"lsdir": {Stdout: []byte(canned)}},
+		Default:     run.Result{Code: 0},
+	}
+	listing, err := FetchDirs(cfg(), r, "/home/u/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listing.Dir != "/home/u/proj" || listing.Parent != "/home/u" {
+		t.Fatalf("listing = %+v", listing)
+	}
+	if len(listing.Entries) != 2 || listing.Entries[0].Name != "alpha" || listing.Entries[1].Path != "/home/u/proj/beta" {
+		t.Fatalf("entries = %+v", listing.Entries)
+	}
+	joined := strings.Join(r.Calls[len(r.Calls)-1].Args, " ")
+	if !strings.Contains(joined, "lsdir") || !strings.Contains(joined, "/home/u/proj") {
+		t.Fatalf("lsdir call = %q", joined)
+	}
+}
+
+func TestFetchDirs_UnreachableErrors(t *testing.T) {
+	r := &run.Recording{Default: run.Result{Code: 255}}
+	if _, err := FetchDirs(cfg(), r, ""); err == nil {
+		t.Fatal("expected error when ssh unreachable")
+	}
+}

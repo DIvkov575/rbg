@@ -19,6 +19,7 @@ type invocation struct {
 	Verb string
 	Name string // --name (launch) or --id (send/read)
 	Task string
+	Dir  string // --dir (lsdir; optional)
 }
 
 func parseArgs(args []string) (*invocation, error) {
@@ -58,6 +59,9 @@ func parseArgs(args []string) (*invocation, error) {
 		if inv.Name == "" {
 			return nil, errors.New("read requires --id")
 		}
+	case "lsdir":
+		// --dir is optional; empty means the agent picks its default.
+		inv.Dir = flagValue(rest, "--dir")
 	case "kill":
 		inv.Name = flagValue(rest, "--id")
 		if inv.Name == "" {
@@ -111,6 +115,8 @@ func main() {
 		os.Exit(a.Read(os.Stdout, inv.Name))
 	case "ls":
 		os.Exit(a.Ls(os.Stdout))
+	case "lsdir":
+		os.Exit(a.Lsdir(os.Stdout, inv.Dir))
 	case "kill":
 		os.Exit(a.Kill(os.Stdout, inv.Name))
 	}
