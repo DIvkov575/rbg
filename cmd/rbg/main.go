@@ -22,6 +22,14 @@ type inv struct {
 }
 
 func parse(args []string) (*inv, error) {
+	// `rbg raw <verb> ...` is the power-user escape hatch: strip the prefix and
+	// parse the remaining verb exactly as before. Bare `rbg` (no args) is dash.
+	if len(args) > 0 && args[0] == "raw" {
+		if len(args) == 1 {
+			return nil, fmt.Errorf("raw requires a verb, e.g. `rbg raw ls`")
+		}
+		args = args[1:]
+	}
 	if len(args) == 0 {
 		return &inv{verb: "dash"}, nil // no args → dashboard
 	}
@@ -136,36 +144,29 @@ func attach(cfg *config.Config, r run.Runner, name string) int {
 // usage returns the full help text (verbs + config), printed by `rbg help`,
 // `-h`/`--help`, and on a parse error.
 func usage() string {
-	return `rbg — manage remote Claude agents on a dev desktop over SSH
+	return `rbg — remote Claude agent management
 
 Usage:
-  rbg [command] [args]
+  rbg                      open the dashboard (default)
+  rbg raw <command> ...    run a single operation (scripting)
+  rbg help                 show this help
 
-Commands:
-  launch "<task>"           launch a new agent; name auto-derived from the task
-  launch <name> "<task>"    launch a new agent with an explicit name
-  send <name> "<task>"      send a follow-up task to an existing agent
-  read <name> [-f]          print an agent's transcript (-f/--follow reserved)
-  ls                        list agents recorded on the desktop
-  attach <name>             attach to an agent interactively (TTY)
-  kill <name>               forget an agent (terminate live child; keep transcript)
-  ping                      check the desktop is reachable
-  deploy                    build and install the agent binary on the desktop
-  dash                      interactive dashboard (also the default with no args)
-  help, -h, --help          show this help
+Dashboard (no args): browse/launch/kill agents, queue tasks, edit config.
 
-Configuration (environment, or ~/.rbg.conf as KEY=value lines; env wins):
-  RBG_HOST         desktop hostname (required)
-  RBG_CWD          remote working directory for agents
-  RBG_SSH          extra ssh options (e.g. "-i ~/.ssh/key -p 2222")
-  RBG_AGENT_PATH   remote agent path (default: .local/bin/rbg-agent)
+raw commands:
+  raw launch "<task>"          launch an agent (name auto-derived)
+  raw launch <name> "<task>"   launch with an explicit name
+  raw send <name> "<task>"     send a follow-up task
+  raw read <name>              print an agent's transcript
+  raw ls                       list agents
+  raw kill <name>              forget an agent (keep transcript)
+  raw attach <name>            attach interactively (TTY)
+  raw ping                     check reachability
+  raw deploy                   build & install the agent on the desktop
 
-Examples:
-  rbg deploy
-  rbg launch "investigate the flaky payments test"
-  rbg ls
-  rbg send fix-flaky-test "now write the fix and run the tests"
-  rbg read fix-flaky-test
+Configuration (env, or ~/.rbg.conf as KEY=value; env wins):
+  RBG_HOST (required), RBG_CWD, RBG_SSH, RBG_AGENT_PATH,
+  RBG_MUX, RBG_CONTROL_PATH, RBG_CONTROL_PERSIST
 `
 }
 

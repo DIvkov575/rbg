@@ -109,6 +109,32 @@ func TestUsageMentionsEveryVerb(t *testing.T) {
 	}
 }
 
+func TestParse_RawPrefix(t *testing.T) {
+	// `rbg raw ls` parses as the ls verb
+	in, err := parse([]string{"raw", "ls"})
+	if err != nil || in.verb != "ls" {
+		t.Fatalf("raw ls: inv=%+v err=%v", in, err)
+	}
+	// `rbg raw launch <name> <task>` keeps its args
+	in, err = parse([]string{"raw", "launch", "alpha", "do it"})
+	if err != nil || in.verb != "launch" || in.name != "alpha" || in.task != "do it" {
+		t.Fatalf("raw launch: inv=%+v err=%v", in, err)
+	}
+}
+
+func TestParse_RawRequiresVerb(t *testing.T) {
+	if _, err := parse([]string{"raw"}); err == nil {
+		t.Fatal("bare `raw` should error (needs a verb)")
+	}
+}
+
+func TestParse_BareStillDash(t *testing.T) {
+	in, err := parse([]string{})
+	if err != nil || in.verb != "dash" {
+		t.Fatalf("bare rbg should be dash, got %+v err=%v", in, err)
+	}
+}
+
 func TestParse_Kill(t *testing.T) {
 	in, err := parse([]string{"kill", "alpha"})
 	if err != nil || in.verb != "kill" || in.name != "alpha" {
