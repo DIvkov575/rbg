@@ -5,7 +5,10 @@ package config
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -67,6 +70,30 @@ func Load(env map[string]string, confPath string) (*Config, error) {
 		ControlPath:    controlPath,
 		ControlPersist: controlPersist,
 	}, nil
+}
+
+// ReadConfFileMap returns the KEY=value pairs in the conf file (empty if absent).
+func ReadConfFileMap(path string) map[string]string {
+	return readConfFile(path)
+}
+
+// WriteConfFile writes vals as sorted KEY=value lines, creating parent dirs.
+// It overwrites the file; callers should pass the full desired key set (read,
+// merge, write) so unrelated keys are preserved.
+func WriteConfFile(path string, vals map[string]string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(vals))
+	for k := range vals {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		fmt.Fprintf(&b, "%s=%s\n", k, vals[k])
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o600)
 }
 
 func readConfFile(path string) map[string]string {

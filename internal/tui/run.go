@@ -17,6 +17,9 @@ type Deps struct {
 	Dirs       func(dir string) (string, string, []DirItem, error) // list subdirs: returns dir, parent, entries
 	MakeDir    func(dir string) (string, error)                    // create a dir, returns its abs path
 	Now        func() string                                       // RFC3339 timestamp (defaults to time.Now)
+
+	LoadConfig func() []ConfigField               // current ~/.rbg.conf fields
+	SaveConfig func(vals map[string]string) error // persist config fields
 }
 
 // Run drives the dashboard until the user quits. It enters raw mode on the
@@ -60,7 +63,21 @@ func Run(d Deps, io Stdio) error {
 			return nil // EOF → quit
 		}
 		var act Action
-		if m.Browsing && m.MakingDir {
+		if m.ConfigOpen && m.ConfigEditing {
+			// Field-edit sub-mode: reuse the text-input decoder so letters are
+			// typed literally rather than triggering config-screen bindings.
+			k, r, isRune := decodeKeyInput(raw)
+			switch {
+			case isRune:
+				m = m.InputRune(r)
+			case k == KeyBackspace:
+				m = m.Backspace()
+			default:
+				m, act = Update(m, k)
+			}
+		} else if m.ConfigOpen {
+			m, act = Update(m, decodeKeyConfig(raw))
+		} else if m.Browsing && m.MakingDir {
 			// Name-entry sub-mode: reuse the text-input decoder so letters like
 			// 'j'/'k'/'c' are typed literally rather than triggering browse nav.
 			k, r, isRune := decodeKeyInput(raw)
@@ -131,6 +148,14 @@ func Run(d Deps, io Stdio) error {
 			}
 			if s, err := d.Fetch(); err == nil {
 				m = m.SetSessions(s)
+			}
+		case ActionLoadConfig:
+			if d.LoadConfig != nil {
+				m = m.SetConfig(d.LoadConfig())
+			}
+		case ActionSaveConfig:
+			if d.SaveConfig != nil {
+				_ = d.SaveConfig(m.ConfigValues())
 			}
 		case ActionAttach:
 			name := m.SelectedName()

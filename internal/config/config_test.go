@@ -80,3 +80,26 @@ func TestMuxDisabledByEnv(t *testing.T) {
 		t.Error("RBG_MUX=0 should disable Mux")
 	}
 }
+
+func TestConfFileRoundTrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "rbg.conf")
+	in := map[string]string{"RBG_HOST": "h1", "RBG_CWD": "/x", "RBG_MUX": "0"}
+	if err := WriteConfFile(p, in); err != nil {
+		t.Fatal(err)
+	}
+	got := ReadConfFileMap(p)
+	for k, v := range in {
+		if got[k] != v {
+			t.Errorf("key %s = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestWriteConfFilePreservesUnknownKeys(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "rbg.conf")
+	WriteConfFile(p, map[string]string{"RBG_HOST": "h", "CUSTOM": "keepme"})
+	got := ReadConfFileMap(p)
+	if got["CUSTOM"] != "keepme" {
+		t.Errorf("unknown key dropped: %v", got)
+	}
+}

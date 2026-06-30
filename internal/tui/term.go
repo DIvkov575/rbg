@@ -36,6 +36,10 @@ func decodeKey(b []byte) Key {
 		return KeyAttach
 	case 'r':
 		return KeyRefresh
+	case 'C':
+		return KeyConfig
+	case 's':
+		return KeySave
 	case 'q', 0x03: // q or Ctrl-C
 		return KeyQuit
 	}
@@ -95,6 +99,37 @@ func decodeKeyBrowse(b []byte) Key {
 		return KeyChoose
 	case 'm':
 		return KeyMkdir
+	case 0x1b, 0x03: // ESC or Ctrl-C
+		return KeyEsc
+	}
+	return KeyNone
+}
+
+// decodeKeyConfig decodes keys while the config field list (not edit-mode) is
+// showing: arrows / j / k navigate, Enter begins editing the selected field,
+// 's' saves, and ESC / Ctrl-C close the screen.
+func decodeKeyConfig(b []byte) Key {
+	if len(b) == 0 {
+		return KeyNone
+	}
+	if len(b) >= 3 && b[0] == 0x1b && b[1] == '[' {
+		switch b[2] {
+		case 'A':
+			return KeyUp
+		case 'B':
+			return KeyDown
+		}
+		return KeyNone
+	}
+	switch b[0] {
+	case 'k':
+		return KeyUp
+	case 'j':
+		return KeyDown
+	case '\r', '\n':
+		return KeyEnter
+	case 's':
+		return KeySave
 	case 0x1b, 0x03: // ESC or Ctrl-C
 		return KeyEsc
 	}

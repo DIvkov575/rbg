@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"os"
 
 	"github.com/divkov575/rbg/internal/client"
 	"github.com/divkov575/rbg/internal/config"
@@ -55,9 +56,32 @@ func dash(cfg *config.Config, r run.Runner) int {
 		MakeDir: func(dir string) (string, error) {
 			return client.MakeDir(cfg, r, dir)
 		},
+		LoadConfig: func() []tui.ConfigField {
+			vals := config.ReadConfFileMap(confPath())
+			keys := []string{"RBG_HOST", "RBG_CWD", "RBG_SSH", "RBG_AGENT_PATH", "RBG_MUX", "RBG_CONTROL_PATH", "RBG_CONTROL_PERSIST"}
+			fields := make([]tui.ConfigField, 0, len(keys))
+			for _, k := range keys {
+				fields = append(fields, tui.ConfigField{Key: k, Value: vals[k]})
+			}
+			return fields
+		},
+		SaveConfig: func(vals map[string]string) error {
+			existing := config.ReadConfFileMap(confPath())
+			for k, v := range vals {
+				if v == "" {
+					delete(existing, k)
+				} else {
+					existing[k] = v
+				}
+			}
+			return config.WriteConfFile(confPath(), existing)
+		},
 	}
 	if err := tui.Run(deps, tui.DefaultStdio()); err != nil {
 		return 1
 	}
 	return 0
 }
+
+// confPath returns the path to the rbg conf file (~/.rbg.conf).
+func confPath() string { return os.ExpandEnv("$HOME/.rbg.conf") }

@@ -29,6 +29,8 @@ const (
 	KeyParent    // h in browse mode: go to parent dir
 	KeyChoose    // c in browse mode: choose current dir
 	KeyMkdir     // m in browse mode: make a new directory
+	KeyConfig    // C: open the config screen
+	KeySave      // s: save the config screen
 )
 
 // Action is what the terminal loop must do after an Update (the model itself
@@ -41,10 +43,12 @@ const (
 	ActionAttach
 	ActionRefresh
 	ActionQuit
-	ActionLaunch // launch m.LaunchTask() in m.ChosenDir()
-	ActionKill   // kill m.SelectedName()
-	ActionBrowse // (re)list m.BrowseDir into the model via SetBrowse
-	ActionMkdir  // create BrowseDir/DirName(), then descend + re-list
+	ActionLaunch     // launch m.LaunchTask() in m.ChosenDir()
+	ActionKill       // kill m.SelectedName()
+	ActionBrowse     // (re)list m.BrowseDir into the model via SetBrowse
+	ActionMkdir      // create BrowseDir/DirName(), then descend + re-list
+	ActionLoadConfig // load ~/.rbg.conf fields into the config screen via SetConfig
+	ActionSaveConfig // persist m.ConfigValues() to ~/.rbg.conf
 )
 
 // DirItem is one browsable subdirectory. It mirrors client.DirEntry but lives in
@@ -53,6 +57,12 @@ const (
 type DirItem struct {
 	Name string
 	Path string
+}
+
+// ConfigField is one editable ~/.rbg.conf key/value in the config screen.
+type ConfigField struct {
+	Key   string
+	Value string
 }
 
 const (
@@ -84,6 +94,12 @@ type Model struct {
 	BrowseSel     int       // highlighted entry
 	chosenDir     string    // dir chosen for the launch (read by the loop)
 	MakingDir     bool      // name-entry sub-mode within browsing (typing a new dir name)
+
+	// Config-screen state (a separate, mutually-exclusive screen).
+	ConfigOpen    bool
+	ConfigFields  []ConfigField
+	ConfigSel     int
+	ConfigEditing bool
 }
 
 // New builds a model from a session list.
@@ -177,8 +193,76 @@ func (m Model) SetBrowse(dir, parent string, items []DirItem) Model {
 	return m
 }
 
+// SetConfig loads the editable fields into the config screen.
+func (m Model) SetConfig(fields []ConfigField) Model {
+	m.ConfigFields = fields
+	if m.ConfigSel >= len(fields) {
+		m.ConfigSel = len(fields) - 1
+	}
+	if m.ConfigSel < 0 {
+		m.ConfigSel = 0
+	}
+	return m
+}
+
+// ConfigValues returns the current key→value map from the config screen.
+func (m Model) ConfigValues() map[string]string {
+	out := make(map[string]string, len(m.ConfigFields))
+	for _, f := range m.ConfigFields {
+		out[f.Key] = f.Value
+	}
+	return out
+}
+
 // Update applies a key, returning the new model and an Action for the loop.
 func Update(m Model, k Key) (Model, Action) {
+	if m.ConfigOpen {
+		if m.ConfigEditing {
+			// Field-edit sub-mode. Printable runes/backspace are applied by the
+			// loop via InputRune/Backspace; only Enter/Esc reach Update here.
+			switch k {
+			case KeyEnter:
+				m.ConfigEditing = false
+				if m.ConfigSel >= 0 && m.ConfigSel < len(m.ConfigFields) {
+					m.ConfigFields[m.ConfigSel].Value = m.Buffer
+				}
+				m.Buffer = ""
+				return m, ActionNone
+			case KeyEsc:
+				m.ConfigEditing = false
+				m.Buffer = ""
+				return m, ActionNone
+			}
+			return m, ActionNone
+		}
+		switch k {
+		case KeyUp:
+			if m.ConfigSel > 0 {
+				m.ConfigSel--
+			}
+			return m, ActionNone
+		case KeyDown:
+			if m.ConfigSel < len(m.ConfigFields)-1 {
+				m.ConfigSel++
+			}
+			return m, ActionNone
+		case KeyEnter:
+			if m.ConfigSel < 0 || m.ConfigSel >= len(m.ConfigFields) {
+				return m, ActionNone
+			}
+			m.ConfigEditing = true
+			// Start from an empty buffer; the typed text replaces the field value
+			// on commit (the plan's TestConfigNavAndEdit asserts a fresh edit).
+			m.Buffer = ""
+			return m, ActionNone
+		case KeySave:
+			return m, ActionSaveConfig
+		case KeyEsc:
+			m.ConfigOpen = false
+			return m, ActionNone
+		}
+		return m, ActionNone
+	}
 	if m.Browsing {
 		if m.MakingDir {
 			// Name-entry sub-mode. Printable runes/backspace are applied by the
@@ -292,6 +376,9 @@ func Update(m Model, k Key) (Model, Action) {
 		return m, ActionAttach
 	case KeyRefresh:
 		return m, ActionRefresh
+	case KeyConfig:
+		m.ConfigOpen = true
+		return m, ActionLoadConfig
 	case KeyQuit:
 		return m, ActionQuit
 	}
@@ -356,6 +443,10 @@ func View(m Model) string {
 	}
 	if h <= 0 {
 		h = fallbackHeight
+	}
+
+	if m.ConfigOpen {
+		return configView(m, w, h)
 	}
 
 	if m.Browsing {
@@ -449,6 +540,50 @@ func listLines(m Model) []string {
 		out = []string{"  (no agents)"}
 	}
 	return out
+}
+
+// configView renders the config screen: a framed list of ~/.rbg.conf key/value
+// fields with the ›-marker on ConfigSel, the selected value shown with a cursor
+// while editing, and a footer of config keybindings.
+func configView(m Model, w, h int) string {
+	inner := w - 2
+	if inner < 1 {
+		inner = 1
+	}
+	bodyH := h - 4 // title rule, footer row, two borders
+	if bodyH < 1 {
+		bodyH = 1
+	}
+
+	lines := make([]string, 0, len(m.ConfigFields))
+	for i, f := range m.ConfigFields {
+		marker := "  "
+		if i == m.ConfigSel {
+			marker = "› "
+		}
+		val := f.Value
+		if i == m.ConfigSel && m.ConfigEditing {
+			val = m.Buffer + "█"
+		}
+		lines = append(lines, fmt.Sprintf("%s%s: %s", marker, f.Key, val))
+	}
+	if len(lines) == 0 {
+		lines = []string{"  (no config fields)"}
+	}
+
+	var b strings.Builder
+	b.WriteString("┌" + labelRule("config", inner) + "┐\n")
+	for i := 0; i < bodyH; i++ {
+		l := ""
+		if i < len(lines) {
+			l = lines[i]
+		}
+		b.WriteString("│" + padTo(l, inner) + "│\n")
+	}
+	hints := " ↑/↓ select  ↵ edit  s save  esc close"
+	b.WriteString("│" + padTo(hints, inner) + "│\n")
+	b.WriteString("└" + strings.Repeat("─", inner) + "┘")
+	return b.String()
 }
 
 // browseView renders the directory-browser overlay: a framed list of

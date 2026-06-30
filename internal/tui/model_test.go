@@ -579,3 +579,64 @@ func TestBrowseFooterMentionsMkdir(t *testing.T) {
 		t.Fatalf("browser footer should mention new-dir:\n%s", v)
 	}
 }
+
+// --- Feature D: in-dashboard config screen ---
+
+func TestConfigKeyOpensConfig(t *testing.T) {
+	m := sample()
+	m, act := Update(m, KeyConfig)
+	if act != ActionLoadConfig {
+		t.Fatalf("KeyConfig action = %v, want ActionLoadConfig", act)
+	}
+	if !m.ConfigOpen {
+		t.Fatal("KeyConfig should open the config screen")
+	}
+}
+
+func TestConfigNavAndEdit(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyConfig)
+	m = m.SetConfig([]ConfigField{{Key: "RBG_HOST", Value: "h"}, {Key: "RBG_CWD", Value: "/x"}})
+	// move down to the second field
+	m, _ = Update(m, KeyDown)
+	if m.ConfigSel != 1 {
+		t.Fatalf("ConfigSel = %d, want 1", m.ConfigSel)
+	}
+	// enter edit mode, type, the field updates
+	m, _ = Update(m, KeyEnter) // begin editing selected field
+	if !m.ConfigEditing {
+		t.Fatal("Enter should begin editing the selected field")
+	}
+	m = m.InputRune('/').InputRune('y')
+	m, _ = Update(m, KeyEnter) // commit the edit
+	if m.ConfigEditing {
+		t.Fatal("Enter should commit the edit")
+	}
+	if got := m.ConfigValues()["RBG_CWD"]; got != "/y" {
+		t.Fatalf("edited RBG_CWD = %q, want /y", got)
+	}
+}
+
+func TestConfigSaveAndClose(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyConfig)
+	m = m.SetConfig([]ConfigField{{Key: "RBG_HOST", Value: "h"}})
+	_, act := Update(m, KeySave)
+	if act != ActionSaveConfig {
+		t.Fatalf("KeySave action = %v, want ActionSaveConfig", act)
+	}
+	m2, _ := Update(m, KeyEsc)
+	if m2.ConfigOpen {
+		t.Fatal("Esc should close the config screen")
+	}
+}
+
+func TestConfigViewRenders(t *testing.T) {
+	m := sample().SetSize(80, 24)
+	m, _ = Update(m, KeyConfig)
+	m = m.SetConfig([]ConfigField{{Key: "RBG_HOST", Value: "desk"}})
+	v := View(m)
+	if !strings.Contains(v, "config") || !strings.Contains(v, "RBG_HOST") || !strings.Contains(v, "desk") {
+		t.Fatalf("config view missing content:\n%s", v)
+	}
+}

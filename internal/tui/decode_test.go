@@ -20,11 +20,18 @@ func TestDecodeKey(t *testing.T) {
 		{[]byte("\x03"), KeyQuit}, // Ctrl-C
 		{[]byte("\x1b"), KeyNone}, // bare ESC (len 1) is not a binding
 		{[]byte("x"), KeyNone},
+		{[]byte("C"), KeyConfig},
 	}
 	for _, c := range cases {
 		if got := decodeKey(c.in); got != c.want {
 			t.Errorf("decodeKey(%q) = %v, want %v", c.in, got, c.want)
 		}
+	}
+}
+
+func TestDecodeKeySave(t *testing.T) {
+	if decodeKey([]byte("s")) != KeySave {
+		t.Error("'s' should decode to KeySave in normal mode")
 	}
 }
 
