@@ -86,3 +86,61 @@ func TestEmptyModelIsSafe(t *testing.T) {
 	}
 	_ = View(m) // must not panic
 }
+
+func TestFormatAge(t *testing.T) {
+	now := "2026-06-30T12:00:00Z"
+	cases := map[string]string{
+		"2026-06-30T11:59:30Z": "30s",
+		"2026-06-30T11:58:00Z": "2m",
+		"2026-06-30T09:00:00Z": "3h",
+		"2026-06-28T12:00:00Z": "2d",
+		"":                     "-", // unknown
+		"garbage":              "-", // unparseable
+	}
+	for started, want := range cases {
+		if got := formatAge(started, now); got != want {
+			t.Errorf("formatAge(%q) = %q, want %q", started, got, want)
+		}
+	}
+}
+
+func TestBoxedViewStructure(t *testing.T) {
+	m := sample().SetSize(80, 24)
+	m.Now = "2026-06-30T12:00:00Z"
+	m.Sessions[0].StartedAt = "2026-06-30T11:58:00Z"
+	m = m.SetTranscript("user: hi\nassistant: yo\n")
+	v := View(m)
+	// box-drawing frame present
+	if !strings.ContainsAny(v, "┌┐└┘│─") {
+		t.Fatalf("expected box-drawing borders, got:\n%s", v)
+	}
+	// every agent name in the left column
+	for _, s := range m.Sessions {
+		if !strings.Contains(v, s.Name) {
+			t.Errorf("agent %q missing from view", s.Name)
+		}
+	}
+	// selected marker, age, transcript content, and key hints
+	if !strings.Contains(v, "›") && !strings.Contains(v, ">") {
+		t.Error("no selection marker")
+	}
+	if !strings.Contains(v, "2m") {
+		t.Error("age not shown")
+	}
+	if !strings.Contains(v, "assistant: yo") {
+		t.Error("transcript not shown")
+	}
+	// no rendered line exceeds the width
+	for _, ln := range strings.Split(v, "\n") {
+		if w := displayWidth(ln); w > 80 {
+			t.Errorf("line exceeds width 80 (%d): %q", w, ln)
+		}
+	}
+}
+
+func TestViewFallsBackWhenNoSize(t *testing.T) {
+	m := sample() // Width/Height zero
+	if v := View(m); v == "" {
+		t.Fatal("View must render with a fallback size")
+	}
+}

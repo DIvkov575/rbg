@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"time"
 
 	"github.com/divkov575/rbg/internal/session"
 )
@@ -11,6 +12,7 @@ type Deps struct {
 	Fetch      func() ([]session.Session, error) // list agents
 	Transcript func(name string) (string, error) // rendered transcript
 	Attach     func(name string) error           // hand terminal to claude
+	Now        func() string                     // RFC3339 timestamp (defaults to time.Now)
 }
 
 // Run drives the dashboard until the user quits. It enters raw mode on the
@@ -20,7 +22,16 @@ func Run(d Deps, io Stdio) error {
 	if err != nil {
 		return err
 	}
+	now := d.Now
+	if now == nil {
+		now = func() string { return time.Now().UTC().Format(time.RFC3339) }
+	}
 	m := New(sessions)
+	stamp := func(mm Model) Model {
+		w, h := termSize(os.Stdin.Fd())
+		return mm.SetSize(w, h).withNow(now())
+	}
+	m = stamp(m)
 
 	restore, err := rawMode(os.Stdin.Fd())
 	if err != nil {
@@ -56,6 +67,7 @@ func Run(d Deps, io Stdio) error {
 			}
 			restore = newRestore // back to raw; defer closure sees the new value
 		}
+		m = stamp(m)
 		draw(io.Out, m)
 	}
 }

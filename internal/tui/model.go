@@ -5,6 +5,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/divkov575/rbg/internal/session"
 )
@@ -35,11 +36,23 @@ const (
 	ActionQuit
 )
 
-// Model is the dashboard state.
+const (
+	fallbackWidth  = 80
+	fallbackHeight = 24
+	minListWidth   = 18
+	maxListWidth   = 32
+)
+
+// Model is the dashboard state. Width/Height are the terminal dimensions (0
+// until SetSize); Now is an RFC3339 timestamp the loop stamps so age rendering
+// stays pure (no clock in the model).
 type Model struct {
 	Sessions   []session.Session
 	Selected   int
-	Transcript string // rendered text of the currently-shown transcript
+	Transcript string
+	Width      int
+	Height     int
+	Now        string
 }
 
 // New builds a model from a session list.
@@ -73,6 +86,19 @@ func (m Model) SetTranscript(text string) Model {
 	return m
 }
 
+// withNow sets the timestamp used for age rendering (loop-injected, keeps the
+// model clock-free).
+func (m Model) withNow(now string) Model {
+	m.Now = now
+	return m
+}
+
+// SetSize records the terminal dimensions for layout.
+func (m Model) SetSize(w, h int) Model {
+	m.Width, m.Height = w, h
+	return m
+}
+
 // Update applies a key, returning the new model and an Action for the loop.
 func Update(m Model, k Key) (Model, Action) {
 	switch k {
@@ -102,23 +128,141 @@ func Update(m Model, k Key) (Model, Action) {
 	return m, ActionNone
 }
 
-// View renders the two-pane dashboard to a string.
-func View(m Model) string {
-	var b strings.Builder
-	b.WriteString("agents:\n")
-	for i, s := range m.Sessions {
-		cursor := "  "
-		if i == m.Selected {
-			cursor = "> "
+// formatAge renders the gap between an RFC3339 startedAt and now as a compact
+// "30s"/"2m"/"3h"/"2d". Unknown/unparseable → "-".
+func formatAge(startedAt, now string) string {
+	if startedAt == "" {
+		return "-"
+	}
+	t, err := time.Parse(time.RFC3339, startedAt)
+	if err != nil {
+		return "-"
+	}
+	n, err := time.Parse(time.RFC3339, now)
+	if err != nil {
+		return "-"
+	}
+	d := n.Sub(t)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours())/24)
+	}
+}
+
+// displayWidth is the rune count of s (our glyphs are width-1; box chars and
+// ASCII alike), used to keep rendered lines within the terminal width.
+func displayWidth(s string) int {
+	return len([]rune(s))
+}
+
+// padTo right-pads s with spaces to exactly w runes (truncating with an ellipsis
+// if longer).
+func padTo(s string, w int) string {
+	r := []rune(s)
+	if len(r) == w {
+		return s
+	}
+	if len(r) > w {
+		if w <= 1 {
+			return string(r[:w])
 		}
-		b.WriteString(fmt.Sprintf("%s%s\n", cursor, s.Name))
+		return string(r[:w-1]) + "…"
 	}
-	b.WriteString("\n[↑/↓ move  ⏎/v view  a attach  r refresh  q quit]\n")
-	b.WriteString("\ntranscript:\n")
+	return s + strings.Repeat(" ", w-len(r))
+}
+
+// View renders the dashboard: a bordered two-pane layout (agent list | selected
+// transcript) à la `claude agents`, sized to the terminal.
+func View(m Model) string {
+	w, h := m.Width, m.Height
+	if w <= 0 {
+		w = fallbackWidth
+	}
+	if h <= 0 {
+		h = fallbackHeight
+	}
+
+	// Layout: outer frame is w wide. Two panes separated by a vertical rule.
+	// listW chosen from the longest "name age" plus padding, clamped.
+	listW := minListWidth
+	for _, s := range m.Sessions {
+		if l := displayWidth(s.Name) + 6; l > listW {
+			listW = l
+		}
+	}
+	if listW > maxListWidth {
+		listW = maxListWidth
+	}
+	if listW > w-12 { // always leave room for the transcript pane
+		listW = w - 12
+	}
+	transW := w - listW - 3 // 3 = two outer borders + one separator
+	if transW < 1 {
+		transW = 1
+	}
+
+	bodyH := h - 4 // top title, header rule, key-hint row, bottom border
+	if bodyH < 1 {
+		bodyH = 1
+	}
+
+	var b strings.Builder
+	// top border with titles
+	b.WriteString("┌" + labelRule("agents", listW) + "┬" + labelRule("transcript", transW) + "┐\n")
+
+	left := listLines(m)
+	right := strings.Split(m.Transcript, "\n")
 	if m.Transcript == "" {
-		b.WriteString("(press ⏎ to load)\n")
-	} else {
-		b.WriteString(m.Transcript)
+		right = []string{"(↵ to load)"}
 	}
+	for i := 0; i < bodyH; i++ {
+		l := ""
+		if i < len(left) {
+			l = left[i]
+		}
+		r := ""
+		if i < len(right) {
+			r = right[i]
+		}
+		b.WriteString("│" + padTo(l, listW) + "│" + padTo(r, transW) + "│\n")
+	}
+
+	// key-hint footer row spanning the full inner width
+	hints := " ↑/↓ move  ↵/v view  a attach  r refresh  q quit"
+	inner := listW + transW + 1
+	b.WriteString("│" + padTo(hints, inner) + "│\n")
+	b.WriteString("└" + strings.Repeat("─", inner) + "┘")
 	return b.String()
+}
+
+// labelRule renders a "─ label ───" segment exactly w runes wide.
+func labelRule(label string, w int) string {
+	s := "─ " + label + " "
+	if displayWidth(s) >= w {
+		return strings.Repeat("─", w)
+	}
+	return s + strings.Repeat("─", w-displayWidth(s))
+}
+
+// listLines renders the agent column: "› name        2m".
+func listLines(m Model) []string {
+	out := make([]string, 0, len(m.Sessions))
+	for i, s := range m.Sessions {
+		marker := "  "
+		if i == m.Selected {
+			marker = "› "
+		}
+		age := formatAge(s.StartedAt, m.Now)
+		out = append(out, fmt.Sprintf("%s%s  %s", marker, s.Name, age))
+	}
+	if len(out) == 0 {
+		out = []string{"  (no agents)"}
+	}
+	return out
 }

@@ -32,3 +32,18 @@ func ioctl(fd, req uintptr, t *syscall.Termios) error {
 	}
 	return nil
 }
+
+// winsize mirrors struct winsize for the TIOCGWINSZ ioctl.
+type winsize struct {
+	rows, cols, xpix, ypix uint16
+}
+
+// termSize returns the terminal (cols, rows) for fd, or (0,0) if unavailable.
+func termSize(fd uintptr) (int, int) {
+	var ws winsize
+	_, _, e := syscall.Syscall(syscall.SYS_IOCTL, fd, syscall.TIOCGWINSZ, uintptr(unsafe.Pointer(&ws)))
+	if e != 0 {
+		return 0, 0
+	}
+	return int(ws.cols), int(ws.rows)
+}
