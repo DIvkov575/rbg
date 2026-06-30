@@ -25,11 +25,11 @@ func TestLaunch_InvokesAgentOverSSH(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d", code)
 	}
-	// second call (index 1) is the agent launch over ssh; index 0 is the gate
-	if len(r.Calls) < 2 {
-		t.Fatalf("expected gate + launch calls, got %d", len(r.Calls))
+	// single round-trip: the agent launch over ssh (no separate gate call)
+	if len(r.Calls) != 1 {
+		t.Fatalf("expected exactly 1 ssh call (no gate), got %d", len(r.Calls))
 	}
-	joined := strings.Join(r.Calls[1].Args, " ")
+	joined := strings.Join(r.Calls[0].Args, " ")
 	if !strings.Contains(joined, "rbg-agent") || !strings.Contains(joined, "launch") {
 		t.Fatalf("launch call = %q", joined)
 	}
@@ -81,5 +81,18 @@ func TestSend_BusyMapsToExit3(t *testing.T) {
 	var out bytes.Buffer
 	if code := Send(cfg(), r, &out, "alpha", "x"); code != 3 {
 		t.Fatalf("want 3, got %d", code)
+	}
+}
+
+func TestRunAgent_UnreachableMapsToDisconnected(t *testing.T) {
+	// ssh exit 255 (cannot connect) must surface as exit 1, not a bogus 255.
+	r := &run.Recording{Default: run.Result{Code: 255}}
+	var out bytes.Buffer
+	if code := Ls(cfg(), r, &out); code != 1 {
+		t.Fatalf("unreachable Ls code = %d, want 1", code)
+	}
+	// exactly one ssh call was made (no gate doubling)
+	if len(r.Calls) != 1 {
+		t.Fatalf("expected 1 ssh call, got %d", len(r.Calls))
 	}
 }

@@ -15,8 +15,9 @@ import (
 
 // Options tunes a single ssh invocation.
 type Options struct {
-	TTY   bool // allocate a tty (-t) for interactive attach
-	Batch bool // BatchMode + ConnectTimeout, for the reachability probe
+	TTY            bool // allocate a tty (-t) for interactive attach
+	Batch          bool // BatchMode + ConnectTimeout, for the reachability probe
+	ConnectTimeout bool // BatchMode + ConnectTimeout for a normal command (fail fast if down)
 }
 
 // QuoteToken POSIX single-quotes a token so the remote login shell treats it as
@@ -55,7 +56,7 @@ func userSetControl(opts []string) bool {
 // the remote arguments and the desktop login shell re-parses the result.
 func BuildSSHArgs(c *config.Config, remote []string, o Options) []string {
 	var args []string
-	if o.Batch {
+	if o.Batch || o.ConnectTimeout {
 		args = append(args, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5")
 	}
 	if o.TTY {

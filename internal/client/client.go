@@ -1,26 +1,39 @@
-// Package client implements the laptop-side verbs: run the connection gate,
-// invoke rbg-agent over ssh with a structured argv, and render the result.
+// Package client implements the laptop-side verbs: invoke rbg-agent over ssh
+// with a structured argv in a single round-trip, and render the result. A
+// connection failure surfaces as ssh exit 255 and is reported as a
+// disconnection (no separate reachability probe).
 package client
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/divkov575/rbg/internal/config"
 	"github.com/divkov575/rbg/internal/run"
 	"github.com/divkov575/rbg/internal/sshx"
 )
 
-// runAgent runs the connection gate then execs rbg-agent <verb> over ssh,
-// returning its stdout and exit code.
+// runAgent execs rbg-agent <verb> over ssh in a SINGLE round-trip and returns
+// its stdout and exit code. There is no separate reachability gate: a real
+// connection failure surfaces as ssh exit 255 (see sshExitUnreachable), which
+// callers map to the disconnection message. This halves per-command latency
+// versus probing first (every command previously paid two ssh channels).
 func runAgent(c *config.Config, r run.Runner, verb string, verbArgs []string) ([]byte, int) {
-	sshx.EnsureReachable(c, r)
 	remote := sshx.AgentArgs(c, verb, verbArgs)
-	sshArgs := sshx.BuildSSHArgs(c, remote, sshx.Options{})
+	sshArgs := sshx.BuildSSHArgs(c, remote, sshx.Options{ConnectTimeout: true})
 	out, code, _ := r.Run("ssh", sshArgs, nil)
+	if code == sshExitUnreachable {
+		fmt.Fprintf(os.Stderr, "cannot reach '%s' — disconnected\n", c.Host)
+		return nil, 1
+	}
 	return out, code
 }
+
+// sshExitUnreachable is ssh(1)'s exit code when it cannot establish the
+// connection (distinct from the agent's own 0/1/3 codes).
+const sshExitUnreachable = 255
 
 // Launch starts a bg agent on the desktop and prints the agent's reply. If name
 // is empty the agent derives one from the task.

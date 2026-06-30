@@ -143,6 +143,13 @@ def test_shell_metacharacters_in_task_are_quoted_not_executed(env, tmp_path):
     res = run_rbg(sim, rbg, ch, "launch", "alpha", malicious)
     assert res.returncode == 0, res.stderr
     assert not os.path.exists(pwned), "injection ran: remote command was not quoted"
-    # and the task survived intact as data in the transcript
-    read = run_rbg(sim, rbg, ch, "read", "alpha")
-    assert "touch ~/PWNED" in read.stdout
+    # and the task survived intact as data in the transcript (launch is detached,
+    # so poll read until the transcript is written)
+    import time
+    seen = ""
+    for _ in range(20):
+        seen = run_rbg(sim, rbg, ch, "read", "alpha").stdout
+        if "touch ~/PWNED" in seen:
+            break
+        time.sleep(0.25)
+    assert "touch ~/PWNED" in seen
