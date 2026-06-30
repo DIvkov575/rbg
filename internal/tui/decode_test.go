@@ -11,8 +11,8 @@ func TestDecodeKey(t *testing.T) {
 		{[]byte("\x1b[B"), KeyDown},
 		{[]byte("k"), KeyKill},
 		{[]byte("j"), KeyDown},
-		{[]byte("\r"), KeyView},
-		{[]byte("v"), KeyView},
+		{[]byte("\r"), KeyNone}, // bare CR in normal mode is no longer a binding
+		{[]byte("v"), KeyNone},  // v no longer maps to anything
 		{[]byte("n"), KeyNew},
 		{[]byte("a"), KeyAttach},
 		{[]byte("r"), KeyRefresh},

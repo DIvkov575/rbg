@@ -33,7 +33,17 @@ func Run(d Deps, io Stdio) error {
 		w, h := termSize(os.Stdin.Fd())
 		return mm.SetSize(w, h).withNow(now())
 	}
-	m = stamp(m)
+	// loadSelected fetches and stores the selected agent's transcript so the
+	// right pane is never empty on load/refresh.
+	loadSelected := func(mm Model) Model {
+		if name := mm.SelectedName(); name != "" {
+			if text, err := d.Transcript(name); err == nil {
+				mm = mm.SetTranscript(text)
+			}
+		}
+		return mm
+	}
+	m = loadSelected(stamp(m))
 
 	restore, err := rawMode(os.Stdin.Fd())
 	if err != nil {
@@ -70,7 +80,7 @@ func Run(d Deps, io Stdio) error {
 			}
 		case ActionRefresh:
 			if s, err := d.Fetch(); err == nil {
-				m = m.SetSessions(s)
+				m = loadSelected(m.SetSessions(s))
 			}
 		case ActionLaunch:
 			if d.Launch != nil {

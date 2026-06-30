@@ -28,8 +28,6 @@ func decodeKey(b []byte) Key {
 	switch b[0] {
 	case 'j':
 		return KeyDown
-	case '\r', '\n', 'v':
-		return KeyView
 	case 'n':
 		return KeyNew
 	case 'k':

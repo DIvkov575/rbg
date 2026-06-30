@@ -35,16 +35,36 @@ func TestDownUpMovesSelection(t *testing.T) {
 	}
 }
 
-func TestViewLoadsTranscriptIntoPane(t *testing.T) {
+func TestMovementLoadsTranscriptIntoPane(t *testing.T) {
 	m := sample()
-	m, act := Update(m, KeyView)
+	// moving the selection emits ActionLoadTranscript so the loop fetches the
+	// now-selected agent's transcript.
+	m, act := Update(m, KeyDown)
 	if act != ActionLoadTranscript {
-		t.Fatalf("KeyView action = %v, want ActionLoadTranscript", act)
+		t.Fatalf("KeyDown action = %v, want ActionLoadTranscript", act)
+	}
+	if m.Selected != 1 {
+		t.Fatalf("KeyDown should move selection, got %d", m.Selected)
+	}
+	m, act = Update(m, KeyUp)
+	if act != ActionLoadTranscript {
+		t.Fatalf("KeyUp action = %v, want ActionLoadTranscript", act)
+	}
+	if m.Selected != 0 {
+		t.Fatalf("KeyUp should move selection, got %d", m.Selected)
 	}
 	// the loop fulfills the action by calling SetTranscript:
 	m = m.SetTranscript("user: hi\nassistant: yo\n")
 	if !strings.Contains(View(m), "assistant: yo") {
 		t.Fatalf("transcript not rendered in view:\n%s", View(m))
+	}
+}
+
+func TestMovementOnEmptyListIsNoop(t *testing.T) {
+	m := New(nil)
+	_, act := Update(m, KeyDown)
+	if act != ActionNone {
+		t.Fatalf("KeyDown on empty list action = %v, want ActionNone", act)
 	}
 }
 
@@ -77,7 +97,7 @@ func TestSelectedName(t *testing.T) {
 
 func TestEmptyModelIsSafe(t *testing.T) {
 	m := New(nil)
-	m, act := Update(m, KeyView) // nothing to load
+	m, act := Update(m, KeyDown) // nothing to load
 	if act != ActionNone {
 		t.Fatalf("empty view action = %v, want ActionNone", act)
 	}

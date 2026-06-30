@@ -18,7 +18,6 @@ const (
 	KeyNone Key = iota
 	KeyUp
 	KeyDown
-	KeyView      // ⏎ or v: load selected transcript
 	KeyAttach    // a
 	KeyRefresh   // r
 	KeyQuit      // q
@@ -164,11 +163,14 @@ func Update(m Model, k Key) (Model, Action) {
 		if m.Selected > 0 {
 			m.Selected--
 		}
+		if m.SelectedName() == "" {
+			return m, ActionNone
+		}
+		return m, ActionLoadTranscript
 	case KeyDown:
 		if m.Selected < len(m.Sessions)-1 {
 			m.Selected++
 		}
-	case KeyView:
 		if m.SelectedName() == "" {
 			return m, ActionNone
 		}
@@ -277,7 +279,7 @@ func View(m Model) string {
 	left := listLines(m)
 	right := strings.Split(m.Transcript, "\n")
 	if m.Transcript == "" {
-		right = []string{"(↵ to load)"}
+		right = []string{"(no transcript)"}
 	}
 	for i := 0; i < bodyH; i++ {
 		l := ""
@@ -298,7 +300,7 @@ func View(m Model) string {
 	if m.Input {
 		hints = " new task: " + m.Buffer + "█"
 	} else {
-		hints = " ↑/↓ move  ↵/v view  n new  k kill  a attach  r refresh  q quit"
+		hints = " ↑/↓ select  n new  k kill  a attach  r refresh  q quit"
 	}
 	b.WriteString("│" + padTo(hints, inner) + "│\n")
 	b.WriteString("└" + strings.Repeat("─", inner) + "┘")
