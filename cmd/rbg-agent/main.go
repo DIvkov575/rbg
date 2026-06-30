@@ -78,13 +78,14 @@ func flagValue(args []string, flag string) string {
 	return ""
 }
 
-func newAgent() *agent.Agent {
+func newAgent(launchDir string) *agent.Agent {
 	home, _ := os.UserHomeDir()
 	return &agent.Agent{
 		Runner:     run.Exec{},
 		StatePath:  filepath.Join(home, ".rbg-agent", "sessions.json"),
 		ClaudeHome: home,
 		Now:        func() string { return time.Now().UTC().Format(time.RFC3339) },
+		LaunchDir:  launchDir,
 	}
 }
 
@@ -94,7 +95,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "rbg-agent: %v\n", err)
 		os.Exit(2)
 	}
-	a := newAgent()
+	a := newAgent(inv.CWD)
 	switch inv.Verb {
 	case "version":
 		fmt.Println("rbg-agent v2")

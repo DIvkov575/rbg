@@ -24,7 +24,7 @@ import (
 // SpawnFunc starts a detached child process whose stdout is redirected to
 // stdoutPath, returning its pid. The real impl sets a new process group so the
 // child outlives the SSH session (the tmux-detachment replacement).
-type SpawnFunc func(name string, args []string, stdoutPath string) (pid int, err error)
+type SpawnFunc func(name string, args []string, stdoutPath, dir string) (pid int, err error)
 
 // Agent holds the agent's injectable dependencies.
 type Agent struct {
@@ -36,6 +36,7 @@ type Agent struct {
 	Spawn      SpawnFunc           // detached child spawner (defaults via DefaultSpawn)
 	KillProc   func(pid int) error // terminate a process group (defaults to defaultKill)
 	LockDir    string              // dir for per-session lockfiles (defaults beside state)
+	LaunchDir  string              // cwd to run claude in ("" = agent default)
 }
 
 const claudeBin = "claude"
@@ -132,7 +133,7 @@ func (a *Agent) Launch(out io.Writer, name, task string) int {
 		spawn = DefaultSpawn
 	}
 	args := append([]string{claudeBin}, claudecli.LaunchHeadlessArgs(sid, task)...)
-	pid, err := spawn(args[0], args[1:], a.sendLogPath(resolved))
+	pid, err := spawn(args[0], args[1:], a.sendLogPath(resolved), a.LaunchDir)
 	if err != nil {
 		fmt.Fprintf(out, "rbg-agent: launch spawn failed: %v\n", err)
 		return 1
@@ -216,7 +217,7 @@ func (a *Agent) Send(out io.Writer, name, task string) int {
 		spawn = DefaultSpawn
 	}
 	args := append([]string{claudeBin}, claudecli.ResumeHeadlessArgs(sess.ClaudeSessionID, task)...)
-	pid, err := spawn(args[0], args[1:], a.sendLogPath(name))
+	pid, err := spawn(args[0], args[1:], a.sendLogPath(name), a.LaunchDir)
 	if err != nil {
 		fmt.Fprintf(out, "rbg-agent: spawn failed: %v\n", err)
 		return 1
@@ -297,7 +298,7 @@ func defaultKill(pid int) error {
 
 // DefaultSpawn starts a detached child in its own process group with stdout
 // appended to stdoutPath. The child survives the parent (and the SSH session).
-func DefaultSpawn(name string, args []string, stdoutPath string) (int, error) {
+func DefaultSpawn(name string, args []string, stdoutPath, dir string) (int, error) {
 	if err := os.MkdirAll(filepath.Dir(stdoutPath), 0o755); err != nil {
 		return 0, err
 	}
@@ -306,6 +307,9 @@ func DefaultSpawn(name string, args []string, stdoutPath string) (int, error) {
 		return 0, err
 	}
 	cmd := exec.Command(name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	cmd.Stdout = f
 	cmd.Stderr = f
 	// Detached child has no stdin; claude waits ~3s for stdin otherwise.

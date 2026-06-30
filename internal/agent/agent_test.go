@@ -19,7 +19,7 @@ func newAgent(t *testing.T, r run.Runner) *Agent {
 		ClaudeHome: dir, // transcripts rooted here
 		Now:        func() string { return "2026-06-28T00:00:00Z" },
 		NewID:      func() string { return "gen-sid-1" },
-		Spawn:      func(name string, args []string, stdoutPath string) (int, error) { return 111, nil },
+		Spawn:      func(name string, args []string, stdoutPath, dir string) (int, error) { return 111, nil },
 	}
 }
 
@@ -42,7 +42,7 @@ func TestLaunch_RecordsSessionAndPrintsJSON(t *testing.T) {
 
 func TestLaunch_SpawnFailureReported(t *testing.T) {
 	a := newAgent(t, &run.Recording{Default: run.Result{Code: 0}})
-	a.Spawn = func(name string, args []string, stdoutPath string) (int, error) {
+	a.Spawn = func(name string, args []string, stdoutPath, dir string) (int, error) {
 		return 0, errSpawnTest
 	}
 	var out bytes.Buffer

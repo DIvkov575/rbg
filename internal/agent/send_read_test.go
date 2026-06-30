@@ -27,7 +27,7 @@ func TestSend_SpawnsChildAndReturnsOK(t *testing.T) {
 	a := newAgent(t, r)
 	seed(t, a, "alpha", "sid-1", "")
 	spawned := false
-	a.Spawn = func(name string, args []string, stdoutPath string) (int, error) {
+	a.Spawn = func(name string, args []string, stdoutPath, dir string) (int, error) {
 		spawned = true
 		return 4321, nil
 	}
@@ -37,6 +37,26 @@ func TestSend_SpawnsChildAndReturnsOK(t *testing.T) {
 	}
 	if !spawned {
 		t.Fatal("expected child spawn")
+	}
+}
+
+// TASK A: the agent must run the claude child in the requested working dir
+// (Agent.LaunchDir, populated from the --cwd flag). Launch must pass that dir
+// through to Spawn so RBG_CWD / the directory-picker actually take effect.
+func TestLaunch_RunsChildInLaunchDir(t *testing.T) {
+	a := newAgent(t, &run.Recording{Default: run.Result{Code: 0}})
+	a.LaunchDir = "/some/dir"
+	var gotDir string
+	a.Spawn = func(name string, args []string, stdoutPath, dir string) (int, error) {
+		gotDir = dir
+		return 4321, nil
+	}
+	var out bytes.Buffer
+	if code := a.Launch(&out, "alpha", "task"); code != 0 {
+		t.Fatalf("Launch code=%d out=%s", code, out.String())
+	}
+	if gotDir != "/some/dir" {
+		t.Fatalf("child dir = %q, want /some/dir", gotDir)
 	}
 }
 
@@ -124,7 +144,7 @@ func TestSend_SpawnUsesAgentOwnedLogPath(t *testing.T) {
 	a := newAgent(t, &run.Recording{Default: run.Result{Code: 0}})
 	seed(t, a, "alpha", "sid-1", "")
 	var gotPath string
-	a.Spawn = func(name string, args []string, stdoutPath string) (int, error) {
+	a.Spawn = func(name string, args []string, stdoutPath, dir string) (int, error) {
 		gotPath = stdoutPath
 		return 1234, nil
 	}
