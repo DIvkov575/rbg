@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 
-**Goal:** Make local agents first-class and persistent — create (incl. blank) agents pinned to a repo, run them manually later with a repo-sync-first step — and add view ergonomics (remote / local / combined / project) to the dashboard.
+**Goal:** Make local agents first-class and persistent (create incl. blank, run manually later with repo-sync-first), AND add a **project launcher** — quickly select a project and dispatch a new session into it, local or remote — plus supporting views (remote / local / combined).
 
 **Architecture:** A new client-only `internal/localagent` package (store + run logic, mirroring `internal/queue`) — ALREADY PROTOTYPED AND TESTED on this branch. The dashboard gains a `View` enum (pure model) re-slicing the agent population; local-agent actions and a `raw local <verb>` CLI group. stdlib only.
 
@@ -121,12 +121,42 @@ func TestSetLocalAgents(t *testing.T) {
 - [ ] **Step 1: Failing tests** — assert each view's `View(m)` output:
   - `ViewLocal` lists local-agent names + their repo + last-run.
   - `ViewCombined` shows "REMOTE" and "LOCAL" section headers.
-  - `ViewProject` groups by repo: a repo header with its remote sessions and local agents under it.
+  - `ViewProject` rendering lives in Task 4b (it is the launcher, not just grouping). Task 4 covers local/combined render only.
   - Footer hints differ per view (e.g. local view shows "run/edit/delete", remote shows "attach/kill").
 - [ ] **Step 2:** Run → FAIL.
 - [ ] **Step 3: Implement** — extend `View(m)` to branch on `m.View`. Add `localView`, `combinedView`, `projectView` render helpers mirroring the existing bordered-pane style (`labelRule`/`padTo`/`displayWidth`/`wrapText`). Project grouping key = repo string (spec open-Q2: repo URL). Keep within width.
 - [ ] **Step 4:** `go test ./internal/tui/` → ok. Render-demo each view to eyeball (temp `zz_demo_test.go`, then delete).
 - [ ] **Step 5:** Commit: `feat(tui): render remote/local/combined/project views`.
+
+---
+
+## Task 4b: Project launcher (PRIMARY feature — select a project, dispatch a new session)
+
+**Files:** Modify `internal/tui/model.go`, `term.go`, `run.go`, `cmd/rbg/dash.go`; project-list helper; tests.
+
+The user's core ask: *quickly select a project and launch/dispatch a new session
+into it, local or remote.* Project view is launch-first.
+
+- [ ] **Step 1: Project list source.** Add `Deps.Projects func() []Project` where
+  `Project{Name, Repo, LocalDir string}`. Build in dash.go by unioning: (a) repos
+  of current local agents (`localagent.List`), (b) repos/dirs of remote sessions,
+  (c) git checkouts under a configured projects root (default `~/workplace/*` with
+  `.git`). Dedupe by repo. Add `tui.Project`. Unit-test the union/dedupe helper.
+- [ ] **Step 2: Failing model tests** — in `ViewProject`: `SetProjects([]Project)`
+  populates; up/down select; launch key (`Enter`) on a project enters task-input
+  (reuse `Buffer`/`InputRune`), then `Enter` → new `ActionLaunchProject` carrying
+  project + typed task + local/remote toggle (reuse `PreviewLocal`/`l`); `b` →
+  `ActionCreateLocalBlank` pinned to that project. Assert action + payload.
+- [ ] **Step 3:** Run → FAIL.
+- [ ] **Step 4: Implement** the `ViewProject` Update branch (select → input →
+  toggle → dispatch), `projectView` render (rows + live-session indicator +
+  footer "↵ launch  l local/remote  b blank  ↑/↓"), loop handling
+  `ActionLaunchProject` → reuse dispatch chain: local = `dispatchLocal`/
+  `localagent.Run` in `LocalDir`; remote = `client.CloneRepo`+`client.Launch`.
+  Status line on result.
+- [ ] **Step 5:** `go build ./... && go vet ./... && go test ./...` → ok. Render-demo
+  the launcher; eyeball.
+- [ ] **Step 6:** Commit: `feat(tui): project launcher — select a project, dispatch local/remote`.
 
 ---
 
@@ -176,7 +206,8 @@ func TestSetLocalAgents(t *testing.T) {
 **Spec coverage:**
 - Blank local agents pinned to a repo → Task 1 (store allows empty Task) + Task 5/6 (create-blank). ✓
 - Manual run later, sync-first → Task 1 (`PlanRun` pulls before claude) + Task 2/5 (run verb/action). ✓ No scheduling (non-goal). ✓
-- Local/remote/combined/project views → Task 3 (enum) + Task 4 (render). ✓
+- Quick project launcher (select project → dispatch new session local/remote) → Task 4b (PRIMARY). ✓
+- Local/combined views → Task 3 (enum) + Task 4 (render); project view → Task 4b. ✓
 - Agent-usable (TTY-free) → Task 2 (`raw local` verbs). ✓
 - Ergonomic principles (per-view actions, status visibility, uniform create) → Tasks 4/5/6. ✓
 

@@ -45,7 +45,7 @@ One flat agents list conflates: remote sessions (desktop, tracked), and now pers
 1. **Remote view** — desktop sessions only (today's agents list). Hover→transcript, attach, kill, launch.
 2. **Local view** — persistent local agents only. Shows name · repo · last-run. Run (manual), edit task, delete, create-blank.
 3. **Combined view** — both, visually grouped (REMOTE / LOCAL section headers). A single place to see everything in flight + everything stand-by.
-4. **Project view** — group ALL agents (local + remote) by their repo/dir. Answers "what's happening on `mymemories`?" — shows the remote agent currently working it AND the local agent pinned to it, together. This is the highest-value view for the user's actual workflow (remote finishes → run the local one on the same repo).
+4. **Project view (PRIMARY — a launcher).** A list of the user's *projects* (repos). Selecting one lets you **immediately dispatch a NEW session into it**, with a local/remote toggle — the fast path the user actually wants ("quickly select a project and launch a session there, local or remote"). Secondarily it shows what's already running on each project (remote sessions + the local agent pinned to it), so the launcher doubles as a per-project status view.
 
 ### Ergonomic principles (the "fleshing out")
 - **Consistent verbs across views.** Selection + hover is universal; the action set adapts (remote: attach/kill/read; local: run/edit/delete). A status footer always shows what keys do *in the current view*.
@@ -53,6 +53,29 @@ One flat agents list conflates: remote sessions (desktop, tracked), and now pers
 - **Project view is the integration point.** It's where "run local after remote syncs" becomes obvious: the repo's remote agent shows `done`, the repo's local agent sits ready — select it, run it.
 - **Local runs need visibility** (today they vanish). A local agent shows `last run: 3m ago` and, optionally, captures run output to `~/.rbg/local-logs/<name>.log` so a `read` works for local agents too — closing the gap with remote `read`.
 - **Creation is uniform.** The existing `n`-flow (browse dir → task) extends: a local-agent create reuses the dir browser to pin a repo, and allows an *empty* task (blank agent) — `Enter` on empty task creates blank rather than refusing.
+
+### Project view = the quick launcher (clarified primary intent)
+
+The user's core ask: **"quickly select a project where I want to launch/dispatch a
+new session, local or remote."** So project view is launch-first:
+
+- **Project list** — the set of projects to launch into. Sources, in order of
+  preference: (a) repos of existing local agents + remote sessions, (b) a
+  configured projects root (e.g. `~/workplace/*` git dirs), (c) the user's
+  recent repos. Each row: project name + repo + any live session indicator.
+- **Select + launch** — on a project, a key opens the launch flow: type the task
+  (or pick a pinned local agent's task), toggle **local/remote**, dispatch. This
+  is the existing preview/dispatch machinery (clone-or-reuse + run) but entered
+  *from a project* instead of from a queue item — no queue staging needed for the
+  common "just run something here now" case.
+- **Local vs remote toggle** is the same `l`-toggle already in the queue preview;
+  local → run laptop claude in the local checkout; remote → clone+launch on the
+  desktop.
+- **Create-blank-here** — pin a blank local agent to the selected project for
+  later manual runs (the "run after the remote syncs" workflow).
+
+This makes project view the home screen for *starting* work; remote/local/combined
+views are for *watching/managing* what's already running.
 
 ### Surfaces
 - **Dashboard (human):** the views above, view-switch key, per-view actions.
