@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParse_Launch(t *testing.T) {
 	inv, err := parse([]string{"launch", "alpha", "do the thing"})
@@ -77,5 +80,31 @@ func TestParse_NoArgsDefaultsToDash(t *testing.T) {
 	in, err := parse([]string{})
 	if err != nil || in.verb != "dash" {
 		t.Fatalf("no-args: inv=%+v err=%v", in, err)
+	}
+}
+
+func TestParse_HelpVariants(t *testing.T) {
+	for _, a := range [][]string{{"help"}, {"-h"}, {"--help"}} {
+		in, err := parse(a)
+		if err != nil {
+			t.Fatalf("parse(%v) err=%v", a, err)
+		}
+		if in.verb != "help" {
+			t.Fatalf("parse(%v) verb=%q, want help", a, in.verb)
+		}
+	}
+}
+
+func TestUsageMentionsEveryVerb(t *testing.T) {
+	u := usage()
+	for _, v := range []string{"launch", "send", "read", "ls", "attach", "ping", "deploy", "dash", "help"} {
+		if !strings.Contains(u, v) {
+			t.Errorf("usage() missing verb %q", v)
+		}
+	}
+	for _, e := range []string{"RBG_HOST", "RBG_CWD", "RBG_SSH", "RBG_AGENT_PATH"} {
+		if !strings.Contains(u, e) {
+			t.Errorf("usage() missing config var %q", e)
+		}
 	}
 }

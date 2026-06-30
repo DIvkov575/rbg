@@ -23,6 +23,9 @@ func parse(args []string) (*inv, error) {
 	if len(args) == 0 {
 		return &inv{verb: "dash"}, nil // no args → dashboard
 	}
+	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
+		return &inv{verb: "help"}, nil
+	}
 	in := &inv{verb: args[0]}
 	rest := args[1:]
 	switch in.verb {
@@ -66,8 +69,12 @@ func parse(args []string) (*inv, error) {
 func main() {
 	in, err := parse(os.Args[1:])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "rbg: %v\n", err)
+		fmt.Fprintf(os.Stderr, "rbg: %v\n\n%s", err, usage())
 		os.Exit(2)
+	}
+	if in.verb == "help" {
+		fmt.Print(usage())
+		os.Exit(0)
 	}
 	cfg, err := config.Load(envMap(), os.ExpandEnv("$HOME/.rbg.conf"))
 	if err != nil {
@@ -117,4 +124,39 @@ func attach(cfg *config.Config, r run.Runner, name string) int {
 	args := sshx.BuildSSHArgs(cfg, []string{"claude", "--resume", id}, sshx.Options{TTY: true})
 	// Interactive: connect to the real terminal.
 	return runInteractive("ssh", args)
+}
+
+// usage returns the full help text (verbs + config), printed by `rbg help`,
+// `-h`/`--help`, and on a parse error.
+func usage() string {
+	return `rbg — manage remote Claude agents on a dev desktop over SSH
+
+Usage:
+  rbg [command] [args]
+
+Commands:
+  launch "<task>"           launch a new agent; name auto-derived from the task
+  launch <name> "<task>"    launch a new agent with an explicit name
+  send <name> "<task>"      send a follow-up task to an existing agent
+  read <name> [-f]          print an agent's transcript (-f/--follow reserved)
+  ls                        list agents recorded on the desktop
+  attach <name>             attach to an agent interactively (TTY)
+  ping                      check the desktop is reachable
+  deploy                    build and install the agent binary on the desktop
+  dash                      interactive dashboard (also the default with no args)
+  help, -h, --help          show this help
+
+Configuration (environment, or ~/.rbg.conf as KEY=value lines; env wins):
+  RBG_HOST         desktop hostname (required)
+  RBG_CWD          remote working directory for agents
+  RBG_SSH          extra ssh options (e.g. "-i ~/.ssh/key -p 2222")
+  RBG_AGENT_PATH   remote agent path (default: .local/bin/rbg-agent)
+
+Examples:
+  rbg deploy
+  rbg launch "investigate the flaky payments test"
+  rbg ls
+  rbg send fix-flaky-test "now write the fix and run the tests"
+  rbg read fix-flaky-test
+`
 }
