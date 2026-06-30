@@ -18,10 +18,15 @@ const (
 	KeyNone Key = iota
 	KeyUp
 	KeyDown
-	KeyView    // ⏎ or v: load selected transcript
-	KeyAttach  // a
-	KeyRefresh // r
-	KeyQuit    // q
+	KeyView      // ⏎ or v: load selected transcript
+	KeyAttach    // a
+	KeyRefresh   // r
+	KeyQuit      // q
+	KeyNew       // n: start a new agent (enter input mode)
+	KeyKill      // k: kill the selected agent
+	KeyEnter     // ↵ in input mode: submit
+	KeyEsc       // esc in input mode: cancel
+	KeyBackspace // backspace in input mode
 )
 
 // Action is what the terminal loop must do after an Update (the model itself
@@ -34,6 +39,8 @@ const (
 	ActionAttach
 	ActionRefresh
 	ActionQuit
+	ActionLaunch // launch m.LaunchTask()
+	ActionKill   // kill m.SelectedName()
 )
 
 const (
@@ -53,6 +60,9 @@ type Model struct {
 	Width      int
 	Height     int
 	Now        string
+	Input      bool   // in task-input (new-agent) mode
+	Buffer     string // task text being typed
+	launchTask string // task captured at submit, read by the loop
 }
 
 // New builds a model from a session list.
@@ -99,9 +109,57 @@ func (m Model) SetSize(w, h int) Model {
 	return m
 }
 
+// InputRune appends a typed rune to the task buffer (only meaningful in input
+// mode; the loop gates on m.Input).
+func (m Model) InputRune(r rune) Model {
+	m.Buffer += string(r)
+	return m
+}
+
+// Backspace removes the last rune from the task buffer.
+func (m Model) Backspace() Model {
+	r := []rune(m.Buffer)
+	if len(r) > 0 {
+		m.Buffer = string(r[:len(r)-1])
+	}
+	return m
+}
+
+// LaunchTask returns the task captured by the most recent submit.
+func (m Model) LaunchTask() string { return m.launchTask }
+
 // Update applies a key, returning the new model and an Action for the loop.
 func Update(m Model, k Key) (Model, Action) {
+	if m.Input {
+		switch k {
+		case KeyEnter:
+			m.Input = false
+			task := strings.TrimSpace(m.Buffer)
+			m.Buffer = ""
+			if task == "" {
+				return m, ActionNone // empty submit cancels
+			}
+			m.launchTask = task
+			return m, ActionLaunch
+		case KeyEsc:
+			m.Input = false
+			m.Buffer = ""
+			return m, ActionNone
+		}
+		// other keys (incl. nav) are inert here; printable runes arrive via
+		// InputRune / Backspace, which the loop calls directly.
+		return m, ActionNone
+	}
 	switch k {
+	case KeyNew:
+		m.Input = true
+		m.Buffer = ""
+		return m, ActionNone
+	case KeyKill:
+		if m.SelectedName() == "" {
+			return m, ActionNone
+		}
+		return m, ActionKill
 	case KeyUp:
 		if m.Selected > 0 {
 			m.Selected--
@@ -233,9 +291,15 @@ func View(m Model) string {
 		b.WriteString("│" + padTo(l, listW) + "│" + padTo(r, transW) + "│\n")
 	}
 
-	// key-hint footer row spanning the full inner width
-	hints := " ↑/↓ move  ↵/v view  a attach  r refresh  q quit"
+	// footer row spanning the full inner width: the task-input prompt while in
+	// input mode, otherwise the key hints.
 	inner := listW + transW + 1
+	var hints string
+	if m.Input {
+		hints = " new task: " + m.Buffer + "█"
+	} else {
+		hints = " ↑/↓ move  ↵/v view  n new  k kill  a attach  r refresh  q quit"
+	}
 	b.WriteString("│" + padTo(hints, inner) + "│\n")
 	b.WriteString("└" + strings.Repeat("─", inner) + "┘")
 	return b.String()

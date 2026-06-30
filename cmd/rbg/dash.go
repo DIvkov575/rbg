@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+
 	"github.com/divkov575/rbg/internal/client"
 	"github.com/divkov575/rbg/internal/config"
 	"github.com/divkov575/rbg/internal/run"
@@ -22,6 +24,15 @@ func dash(cfg *config.Config, r run.Runner) int {
 			if code := attach(cfg, r, name); code != 0 {
 				return errAttach
 			}
+			return nil
+		},
+		Launch: func(task string) error {
+			// name auto-derived by the agent (empty name).
+			client.Launch(cfg, r, io.Discard, "", task)
+			return nil
+		},
+		Kill: func(name string) error {
+			client.Kill(cfg, r, io.Discard, name)
 			return nil
 		},
 	}

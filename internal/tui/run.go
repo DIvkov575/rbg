@@ -12,6 +12,8 @@ type Deps struct {
 	Fetch      func() ([]session.Session, error) // list agents
 	Transcript func(name string) (string, error) // rendered transcript
 	Attach     func(name string) error           // hand terminal to claude
+	Launch     func(task string) error           // spawn a new agent
+	Kill       func(name string) error           // forget/terminate an agent
 	Now        func() string                     // RFC3339 timestamp (defaults to time.Now)
 }
 
@@ -41,9 +43,24 @@ func Run(d Deps, io Stdio) error {
 
 	draw(io.Out, m)
 	for {
-		k := readKey(io.In)
+		raw := readRaw(io.In)
+		if raw == nil {
+			return nil // EOF → quit
+		}
 		var act Action
-		m, act = Update(m, k)
+		if m.Input {
+			k, r, isRune := decodeKeyInput(raw)
+			switch {
+			case isRune:
+				m = m.InputRune(r)
+			case k == KeyBackspace:
+				m = m.Backspace()
+			default:
+				m, act = Update(m, k)
+			}
+		} else {
+			m, act = Update(m, decodeKey(raw))
+		}
 		switch act {
 		case ActionQuit:
 			return nil
@@ -55,17 +72,29 @@ func Run(d Deps, io Stdio) error {
 			if s, err := d.Fetch(); err == nil {
 				m = m.SetSessions(s)
 			}
+		case ActionLaunch:
+			if d.Launch != nil {
+				_ = d.Launch(m.LaunchTask())
+			}
+			if s, err := d.Fetch(); err == nil {
+				m = m.SetSessions(s)
+			}
+		case ActionKill:
+			if d.Kill != nil {
+				_ = d.Kill(m.SelectedName())
+			}
+			if s, err := d.Fetch(); err == nil {
+				m = m.SetSessions(s)
+			}
 		case ActionAttach:
 			name := m.SelectedName()
 			restore()          // cooked mode for interactive claude
 			_ = d.Attach(name) // blocks until the user exits claude
 			newRestore, rerr := rawMode(os.Stdin.Fd())
 			if rerr != nil {
-				// Can't resume raw mode; the terminal is already cooked (safe)
-				// from the restore() above, so exit rather than loop blind.
 				return rerr
 			}
-			restore = newRestore // back to raw; defer closure sees the new value
+			restore = newRestore
 		}
 		m = stamp(m)
 		draw(io.Out, m)

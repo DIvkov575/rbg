@@ -26,12 +26,14 @@ func decodeKey(b []byte) Key {
 		return KeyNone
 	}
 	switch b[0] {
-	case 'k':
-		return KeyUp
 	case 'j':
 		return KeyDown
 	case '\r', '\n', 'v':
 		return KeyView
+	case 'n':
+		return KeyNew
+	case 'k':
+		return KeyKill
 	case 'a':
 		return KeyAttach
 	case 'r':
@@ -40,6 +42,30 @@ func decodeKey(b []byte) Key {
 		return KeyQuit
 	}
 	return KeyNone
+}
+
+// decodeKeyInput decodes a raw chunk while the dashboard is in task-input mode.
+// It returns (key, rune, isRune): control keys map to KeyEnter/KeyEsc/KeyNone;
+// printable bytes return as a rune for InputRune. Backspace maps to KeyNone with
+// a sentinel handled by the loop via isBackspace.
+func decodeKeyInput(b []byte) (Key, rune, bool) {
+	if len(b) == 0 {
+		return KeyNone, 0, false
+	}
+	switch b[0] {
+	case '\r', '\n':
+		return KeyEnter, 0, false
+	case 0x1b: // ESC
+		return KeyEsc, 0, false
+	case 0x7f, 0x08: // DEL / Backspace
+		return KeyBackspace, 0, false
+	case 0x03: // Ctrl-C cancels input
+		return KeyEsc, 0, false
+	}
+	if b[0] >= 0x20 && b[0] < 0x7f { // printable ASCII
+		return KeyNone, rune(b[0]), true
+	}
+	return KeyNone, 0, false
 }
 
 const clearScreen = "\x1b[2J\x1b[H" // clear + cursor home
@@ -51,6 +77,16 @@ func draw(w io.Writer, m Model) {
 }
 
 // readKey reads one key event from r (a raw-mode fd). Returns KeyNone on EOF.
+// readRaw reads one input chunk; nil/empty means EOF (treated as quit).
+func readRaw(r io.Reader) []byte {
+	buf := make([]byte, 8)
+	n, err := r.Read(buf)
+	if err != nil || n == 0 {
+		return nil
+	}
+	return buf[:n]
+}
+
 func readKey(r io.Reader) Key {
 	buf := make([]byte, 8)
 	n, err := r.Read(buf)

@@ -144,3 +144,106 @@ func TestViewFallsBackWhenNoSize(t *testing.T) {
 		t.Fatal("View must render with a fallback size")
 	}
 }
+
+func TestNewKeyEntersInputMode(t *testing.T) {
+	m := sample()
+	m, act := Update(m, KeyNew)
+	if act != ActionNone {
+		t.Fatalf("entering input should not emit an action yet, got %v", act)
+	}
+	if !m.Input {
+		t.Fatal("KeyNew should enter input mode")
+	}
+}
+
+func TestInputModeTypingAndSubmit(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	for _, r := range "fix bug" {
+		m = m.InputRune(r)
+	}
+	if m.Buffer != "fix bug" {
+		t.Fatalf("buffer = %q", m.Buffer)
+	}
+	m, act := Update(m, KeyEnter)
+	if act != ActionLaunch {
+		t.Fatalf("Enter in input mode should ActionLaunch, got %v", act)
+	}
+	if m.Input {
+		t.Fatal("submit should exit input mode")
+	}
+	if m.LaunchTask() != "fix bug" {
+		t.Fatalf("LaunchTask = %q", m.LaunchTask())
+	}
+}
+
+func TestInputModeBackspaceAndEscape(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.InputRune('a').InputRune('b')
+	m = m.Backspace()
+	if m.Buffer != "a" {
+		t.Fatalf("buffer after backspace = %q", m.Buffer)
+	}
+	m, act := Update(m, KeyEsc)
+	if act != ActionNone || m.Input {
+		t.Fatalf("Esc should cancel input mode (act=%v input=%v)", act, m.Input)
+	}
+	if m.Buffer != "" {
+		t.Fatalf("cancel should clear buffer, got %q", m.Buffer)
+	}
+}
+
+func TestEmptySubmitDoesNotLaunch(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m, act := Update(m, KeyEnter) // empty buffer
+	if act == ActionLaunch {
+		t.Fatal("empty task must not launch")
+	}
+}
+
+func TestKillKeyYieldsKillAction(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyDown)
+	_, act := Update(m, KeyKill)
+	if act != ActionKill {
+		t.Fatalf("KeyKill action = %v, want ActionKill", act)
+	}
+}
+
+func TestKillEmptyListNoop(t *testing.T) {
+	m := New(nil)
+	_, act := Update(m, KeyKill)
+	if act != ActionNone {
+		t.Fatalf("kill on empty list should be noop, got %v", act)
+	}
+}
+
+func TestInputModeIgnoresNavKeys(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	before := m.Selected
+	m, _ = Update(m, KeyDown) // in input mode, nav must not move selection
+	if m.Selected != before {
+		t.Fatal("nav keys must be inert in input mode")
+	}
+}
+
+func TestViewShowsInputPrompt(t *testing.T) {
+	m := sample().SetSize(80, 24)
+	m, _ = Update(m, KeyNew)
+	m = m.InputRune('h').InputRune('i')
+	v := View(m)
+	if !strings.Contains(v, "new task:") || !strings.Contains(v, "hi") {
+		t.Fatalf("input prompt/buffer not shown:\n%s", v)
+	}
+}
+
+func TestViewKeyHintsIncludeNewAndKill(t *testing.T) {
+	m := sample().SetSize(80, 24)
+	v := View(m)
+	if !strings.Contains(v, "n new") || !strings.Contains(v, "k kill") {
+		t.Fatalf("key hints missing n/k:\n%s", v)
+	}
+}
