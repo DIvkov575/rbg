@@ -5,6 +5,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/divkov575/rbg/internal/client"
 	"github.com/divkov575/rbg/internal/config"
@@ -80,6 +82,9 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rbg: %v\n", err)
 		os.Exit(2)
+	}
+	if cfg.Mux {
+		ensureControlDir(cfg.ControlPath)
 	}
 	r := run.Exec{}
 	switch in.verb {
@@ -159,4 +164,16 @@ Examples:
   rbg send fix-flaky-test "now write the fix and run the tests"
   rbg read fix-flaky-test
 `
+}
+
+// ensureControlDir creates the parent directory of the SSH ControlPath socket,
+// expanding a leading ~/. ssh does not create it and fails to multiplex if it
+// is missing. Best-effort: a failure here just means no socket reuse.
+func ensureControlDir(controlPath string) {
+	if strings.HasPrefix(controlPath, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			controlPath = filepath.Join(home, controlPath[2:])
+		}
+	}
+	_ = os.MkdirAll(filepath.Dir(controlPath), 0o700)
 }

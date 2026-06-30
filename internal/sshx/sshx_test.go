@@ -105,3 +105,36 @@ func TestRemoteCommand_AgentPathHasNoTilde(t *testing.T) {
 		t.Fatalf("agent path should be quoted as a relative path: %q", cmd)
 	}
 }
+
+func TestBuildSSHArgs_InjectsMuxWhenEnabled(t *testing.T) {
+	c := &config.Config{Host: "desk", AgentPath: "rbg-agent",
+		Mux: true, ControlPath: "~/.rbg/cm-%C", ControlPersist: "10m"}
+	got := strings.Join(BuildSSHArgs(c, []string{"rbg-agent", "ls"}, Options{}), " ")
+	for _, want := range []string{
+		"-o ControlMaster=auto",
+		"-o ControlPath=~/.rbg/cm-%C",
+		"-o ControlPersist=10m",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("mux args missing %q in: %s", want, got)
+		}
+	}
+}
+
+func TestBuildSSHArgs_NoMuxWhenDisabled(t *testing.T) {
+	c := &config.Config{Host: "desk", AgentPath: "rbg-agent", Mux: false}
+	got := strings.Join(BuildSSHArgs(c, []string{"rbg-agent", "ls"}, Options{}), " ")
+	if strings.Contains(got, "ControlMaster") {
+		t.Errorf("mux must not be injected when disabled: %s", got)
+	}
+}
+
+func TestBuildSSHArgs_SkipsMuxWhenUserSetsControl(t *testing.T) {
+	c := &config.Config{Host: "desk", AgentPath: "rbg-agent", Mux: true,
+		ControlPath: "~/.rbg/cm-%C", ControlPersist: "10m",
+		SSHOpts: []string{"-o", "ControlMaster=no"}}
+	got := strings.Join(BuildSSHArgs(c, []string{"rbg-agent", "ls"}, Options{}), " ")
+	if strings.Contains(got, "ControlMaster=auto") {
+		t.Errorf("must not inject mux when user set a Control option: %s", got)
+	}
+}

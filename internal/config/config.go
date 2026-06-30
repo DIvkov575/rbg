@@ -11,13 +11,20 @@ import (
 
 // Config is the resolved client configuration.
 type Config struct {
-	Host      string
-	CWD       string
-	SSHOpts   []string
-	AgentPath string
+	Host           string
+	CWD            string
+	SSHOpts        []string
+	AgentPath      string
+	Mux            bool   // reuse one SSH connection across commands (multiplexing)
+	ControlPath    string // ssh ControlPath socket (when Mux)
+	ControlPersist string // ssh ControlPersist idle duration (when Mux)
 }
 
-const defaultAgentPath = ".local/bin/rbg-agent"
+const (
+	defaultAgentPath      = ".local/bin/rbg-agent"
+	defaultControlPath    = "~/.rbg/cm-%C" // %C = hash of (host,port,user)
+	defaultControlPersist = "10m"
+)
 
 // Load merges env over the conf file at confPath. Pass os.Environ-derived map
 // for env; a missing file is not an error (only a missing RBG_HOST is).
@@ -38,11 +45,27 @@ func Load(env map[string]string, confPath string) (*Config, error) {
 	if agentPath == "" {
 		agentPath = defaultAgentPath
 	}
+	mux := true
+	switch strings.ToLower(get("RBG_MUX")) {
+	case "0", "false", "no", "off":
+		mux = false
+	}
+	controlPath := get("RBG_CONTROL_PATH")
+	if controlPath == "" {
+		controlPath = defaultControlPath
+	}
+	controlPersist := get("RBG_CONTROL_PERSIST")
+	if controlPersist == "" {
+		controlPersist = defaultControlPersist
+	}
 	return &Config{
-		Host:      host,
-		CWD:       get("RBG_CWD"),
-		SSHOpts:   strings.Fields(get("RBG_SSH")),
-		AgentPath: agentPath,
+		Host:           host,
+		CWD:            get("RBG_CWD"),
+		SSHOpts:        strings.Fields(get("RBG_SSH")),
+		AgentPath:      agentPath,
+		Mux:            mux,
+		ControlPath:    controlPath,
+		ControlPersist: controlPersist,
 	}, nil
 }
 

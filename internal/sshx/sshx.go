@@ -38,6 +38,17 @@ func RemoteCommand(argv []string) string {
 	return strings.Join(quoted, " ")
 }
 
+// userSetControl reports whether the user's own SSH options already configure
+// connection multiplexing, so rbg should not inject its own (theirs wins).
+func userSetControl(opts []string) bool {
+	for _, o := range opts {
+		if strings.HasPrefix(o, "Control") {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildSSHArgs returns the argv for `ssh` (excluding the leading "ssh"):
 // [opts...] <host> <remote-command>. The remote argv is collapsed into a SINGLE
 // shell-quoted string element via RemoteCommand, because OpenSSH concatenates
@@ -49,6 +60,13 @@ func BuildSSHArgs(c *config.Config, remote []string, o Options) []string {
 	}
 	if o.TTY {
 		args = append(args, "-t")
+	}
+	if c.Mux && !userSetControl(c.SSHOpts) {
+		args = append(args,
+			"-o", "ControlMaster=auto",
+			"-o", "ControlPath="+c.ControlPath,
+			"-o", "ControlPersist="+c.ControlPersist,
+		)
 	}
 	args = append(args, c.SSHOpts...)
 	args = append(args, c.Host)

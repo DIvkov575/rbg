@@ -61,3 +61,22 @@ func TestQuotedValuesAndComments(t *testing.T) {
 		t.Errorf("Host = %q, want quoted", cfg.Host)
 	}
 }
+
+func TestMuxDefaultsOn(t *testing.T) {
+	conf := writeConf(t, "RBG_HOST=h\n")
+	cfg, _ := Load(map[string]string{}, conf)
+	if !cfg.Mux {
+		t.Error("Mux should default on")
+	}
+	if cfg.ControlPath == "" || cfg.ControlPersist == "" {
+		t.Errorf("Control defaults missing: path=%q persist=%q", cfg.ControlPath, cfg.ControlPersist)
+	}
+}
+
+func TestMuxDisabledByEnv(t *testing.T) {
+	conf := writeConf(t, "RBG_HOST=h\n")
+	cfg, _ := Load(map[string]string{"RBG_MUX": "0"}, conf)
+	if cfg.Mux {
+		t.Error("RBG_MUX=0 should disable Mux")
+	}
+}
