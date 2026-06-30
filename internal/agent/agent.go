@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/divkov575/rbg/internal/claudecli"
 	"github.com/divkov575/rbg/internal/render"
@@ -145,6 +146,7 @@ func (a *Agent) Launch(out io.Writer, name, task string) int {
 		TranscriptPath:  a.transcriptPath(sid),
 		PID:             pid,
 		StartedAt:       a.Now(),
+		Dir:             a.LaunchDir,
 	})
 	if err := store.Save(); err != nil {
 		fmt.Fprintf(out, "rbg-agent: %v\n", err)
@@ -165,6 +167,7 @@ func (a *Agent) Ls(out io.Writer) int {
 	for _, s := range store.Sessions {
 		list = append(list, s)
 	}
+	sortSessions(list)
 	json.NewEncoder(out).Encode(list)
 	return 0
 }
@@ -410,4 +413,49 @@ func (a *Agent) Lsdir(out io.Writer, dir string) int {
 	})
 	json.NewEncoder(out).Encode(listing)
 	return 0
+}
+
+// parseStartedAt parses an RFC3339 timestamp, returning the zero time for
+// empty or unparseable input so such sessions sort as oldest.
+func parseStartedAt(s string) time.Time {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// sortSessions orders sessions for a stable, meaningful Ls listing. Agents are
+// grouped by working directory; the group containing the most-recently-created
+// agent comes first, and within a group agents are newest-first. Ties break on
+// Name ascending (within a group) or Dir ascending (between groups) so the
+// order is fully deterministic regardless of map iteration order.
+func sortSessions(list []session.Session) {
+	// Per-Dir newest StartedAt, used as the primary (group) sort key.
+	groupNewest := map[string]time.Time{}
+	for _, s := range list {
+		t := parseStartedAt(s.StartedAt)
+		if cur, ok := groupNewest[s.Dir]; !ok || t.After(cur) {
+			groupNewest[s.Dir] = t
+		}
+	}
+	sort.SliceStable(list, func(i, j int) bool {
+		a, b := list[i], list[j]
+		// Primary: group's newest StartedAt, descending.
+		ga, gb := groupNewest[a.Dir], groupNewest[b.Dir]
+		if !ga.Equal(gb) {
+			return ga.After(gb)
+		}
+		// Group tie-break: Dir ascending.
+		if a.Dir != b.Dir {
+			return a.Dir < b.Dir
+		}
+		// Within a group: StartedAt descending (newest first).
+		ta, tb := parseStartedAt(a.StartedAt), parseStartedAt(b.StartedAt)
+		if !ta.Equal(tb) {
+			return ta.After(tb)
+		}
+		// Final tie-break: Name ascending.
+		return a.Name < b.Name
+	})
 }

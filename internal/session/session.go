@@ -15,6 +15,7 @@ type Session struct {
 	TranscriptPath  string `json:"transcriptPath"`
 	PID             int    `json:"pid"`
 	StartedAt       string `json:"startedAt"`
+	Dir             string `json:"dir"`
 }
 
 // Store is the in-memory + on-disk session map.

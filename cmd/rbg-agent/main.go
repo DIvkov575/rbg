@@ -88,7 +88,7 @@ func newAgent(launchDir string) *agent.Agent {
 		Runner:     run.Exec{},
 		StatePath:  filepath.Join(home, ".rbg-agent", "sessions.json"),
 		ClaudeHome: home,
-		Now:        func() string { return time.Now().UTC().Format(time.RFC3339) },
+		Now:        func() string { return time.Now().UTC().Format(time.RFC3339Nano) },
 		LaunchDir:  launchDir,
 	}
 }

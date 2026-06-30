@@ -66,3 +66,17 @@ func TestDeleteMissingIsNoop(t *testing.T) {
 	s, _ := Load(filepath.Join(t.TempDir(), "s.json"))
 	s.Delete("ghost") // must not panic
 }
+
+func TestAddSaveLoadRoundtripDir(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sessions.json")
+	s, _ := Load(p)
+	s.Add(Session{Name: "alpha", ClaudeSessionID: "sid-1", Dir: "/home/me/proj"})
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := Load(p)
+	a, ok := got.Get("alpha")
+	if !ok || a.Dir != "/home/me/proj" {
+		t.Fatalf("Dir roundtrip failed: %+v ok=%v", a, ok)
+	}
+}
