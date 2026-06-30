@@ -31,6 +31,10 @@ const (
 	KeyMkdir     // m in browse mode: make a new directory
 	KeyConfig    // C: open the config screen
 	KeySave      // s: save the config screen
+	KeyQueue     // Q: open the queue screen
+	KeyDispatch  // d (in queue): dispatch the selected item
+	KeyRemove    // x (in queue): remove the selected item
+	KeyQueueAdd  // a (in queue): add a new item
 )
 
 // Action is what the terminal loop must do after an Update (the model itself
@@ -43,12 +47,16 @@ const (
 	ActionAttach
 	ActionRefresh
 	ActionQuit
-	ActionLaunch     // launch m.LaunchTask() in m.ChosenDir()
-	ActionKill       // kill m.SelectedName()
-	ActionBrowse     // (re)list m.BrowseDir into the model via SetBrowse
-	ActionMkdir      // create BrowseDir/DirName(), then descend + re-list
-	ActionLoadConfig // load ~/.rbg.conf fields into the config screen via SetConfig
-	ActionSaveConfig // persist m.ConfigValues() to ~/.rbg.conf
+	ActionLaunch      // launch m.LaunchTask() in m.ChosenDir()
+	ActionKill        // kill m.SelectedName()
+	ActionBrowse      // (re)list m.BrowseDir into the model via SetBrowse
+	ActionMkdir       // create BrowseDir/DirName(), then descend + re-list
+	ActionLoadConfig  // load ~/.rbg.conf fields into the config screen via SetConfig
+	ActionSaveConfig  // persist m.ConfigValues() to ~/.rbg.conf
+	ActionLoadQueue   // load the staged queue items via SetQueue
+	ActionDispatch    // dispatch m.DispatchItem() (clone repo + launch)
+	ActionQueueRemove // remove the item at m.QueueSel from the queue store
+	ActionQueueAdd    // add m.PendingItem() to the queue store
 )
 
 // DirItem is one browsable subdirectory. It mirrors client.DirEntry but lives in
@@ -63,6 +71,12 @@ type DirItem struct {
 type ConfigField struct {
 	Key   string
 	Value string
+}
+
+// QueueItem is one staged task shown in the queue screen.
+type QueueItem struct {
+	Prompt string
+	Repo   string
 }
 
 const (
@@ -100,6 +114,14 @@ type Model struct {
 	ConfigFields  []ConfigField
 	ConfigSel     int
 	ConfigEditing bool
+
+	// Queue-screen state (a separate, mutually-exclusive screen).
+	QueueOpen   bool
+	QueueItems  []QueueItem
+	QueueSel    int
+	QueueAdding bool      // entering a new item
+	addStage    int       // 0 = typing prompt, 1 = typing repo
+	pendingItem QueueItem // accumulates the new item
 }
 
 // New builds a model from a session list.
@@ -214,8 +236,91 @@ func (m Model) ConfigValues() map[string]string {
 	return out
 }
 
+// SetQueue loads the staged items into the queue screen, clamping QueueSel.
+func (m Model) SetQueue(items []QueueItem) Model {
+	m.QueueItems = items
+	if m.QueueSel >= len(items) {
+		m.QueueSel = len(items) - 1
+	}
+	if m.QueueSel < 0 {
+		m.QueueSel = 0
+	}
+	return m
+}
+
+// DispatchItem returns the highlighted queue item (zero value if none).
+func (m Model) DispatchItem() QueueItem {
+	if m.QueueSel < 0 || m.QueueSel >= len(m.QueueItems) {
+		return QueueItem{}
+	}
+	return m.QueueItems[m.QueueSel]
+}
+
+// PendingItem returns the item accumulated by the in-progress add flow.
+func (m Model) PendingItem() QueueItem { return m.pendingItem }
+
 // Update applies a key, returning the new model and an Action for the loop.
 func Update(m Model, k Key) (Model, Action) {
+	if m.QueueOpen {
+		if m.QueueAdding {
+			// Two-stage add: stage 0 captures the prompt, stage 1 the repo.
+			// Printable runes/backspace are applied by the loop via
+			// InputRune/Backspace; only Enter/Esc reach Update here.
+			switch k {
+			case KeyEnter:
+				if m.addStage == 0 {
+					m.pendingItem.Prompt = m.Buffer
+					m.Buffer = ""
+					m.addStage = 1
+					return m, ActionNone
+				}
+				m.pendingItem.Repo = m.Buffer
+				m.Buffer = ""
+				m.QueueAdding = false
+				m.addStage = 0
+				return m, ActionQueueAdd
+			case KeyEsc:
+				m.QueueAdding = false
+				m.addStage = 0
+				m.Buffer = ""
+				m.pendingItem = QueueItem{}
+				return m, ActionNone
+			}
+			return m, ActionNone
+		}
+		switch k {
+		case KeyUp:
+			if m.QueueSel > 0 {
+				m.QueueSel--
+			}
+			return m, ActionNone
+		case KeyDown:
+			if m.QueueSel < len(m.QueueItems)-1 {
+				m.QueueSel++
+			}
+			return m, ActionNone
+		case KeyDispatch:
+			if len(m.QueueItems) == 0 {
+				return m, ActionNone
+			}
+			return m, ActionDispatch
+		case KeyRemove:
+			if len(m.QueueItems) == 0 {
+				return m, ActionNone
+			}
+			return m, ActionQueueRemove
+		case KeyQueueAdd:
+			m.QueueAdding = true
+			m.addStage = 0
+			m.Buffer = ""
+			m.pendingItem = QueueItem{}
+			return m, ActionNone
+		case KeyEsc:
+			m.QueueOpen = false
+			return m, ActionNone
+		}
+		return m, ActionNone
+	}
 	if m.ConfigOpen {
 		if m.ConfigEditing {
 			// Field-edit sub-mode. Printable runes/backspace are applied by the
@@ -379,6 +484,9 @@ func Update(m Model, k Key) (Model, Action) {
 	case KeyConfig:
 		m.ConfigOpen = true
 		return m, ActionLoadConfig
+	case KeyQueue:
+		m.QueueOpen = true
+		return m, ActionLoadQueue
 	case KeyQuit:
 		return m, ActionQuit
 	}
@@ -443,6 +551,10 @@ func View(m Model) string {
 	}
 	if h <= 0 {
 		h = fallbackHeight
+	}
+
+	if m.QueueOpen {
+		return queueView(m, w, h)
 	}
 
 	if m.ConfigOpen {
@@ -581,6 +693,56 @@ func configView(m Model, w, h int) string {
 		b.WriteString("│" + padTo(l, inner) + "│\n")
 	}
 	hints := " ↑/↓ select  ↵ edit  s save  esc close"
+	b.WriteString("│" + padTo(hints, inner) + "│\n")
+	b.WriteString("└" + strings.Repeat("─", inner) + "┘")
+	return b.String()
+}
+
+// queueView renders the queue screen: a framed list of staged items
+// (`"<prompt>"  @<repo>`) with the ›-marker on QueueSel. While adding, it shows
+// the current field entry (prompt or repo) with a cursor, and a footer of
+// queue keybindings.
+func queueView(m Model, w, h int) string {
+	inner := w - 2
+	if inner < 1 {
+		inner = 1
+	}
+	bodyH := h - 4 // title rule, footer row, two borders
+	if bodyH < 1 {
+		bodyH = 1
+	}
+
+	lines := make([]string, 0, len(m.QueueItems))
+	for i, it := range m.QueueItems {
+		marker := "  "
+		if i == m.QueueSel {
+			marker = "› "
+		}
+		lines = append(lines, fmt.Sprintf("%s%q  @%s", marker, it.Prompt, it.Repo))
+	}
+	if len(lines) == 0 {
+		lines = []string{"  (queue empty)"}
+	}
+
+	var b strings.Builder
+	b.WriteString("┌" + labelRule("queue", inner) + "┐\n")
+	for i := 0; i < bodyH; i++ {
+		l := ""
+		if i < len(lines) {
+			l = lines[i]
+		}
+		b.WriteString("│" + padTo(l, inner) + "│\n")
+	}
+	var hints string
+	if m.QueueAdding {
+		if m.addStage == 0 {
+			hints = " prompt: " + m.Buffer + "█"
+		} else {
+			hints = " repo: " + m.Buffer + "█"
+		}
+	} else {
+		hints = " ↑/↓  a add  d dispatch  x remove  esc close"
+	}
 	b.WriteString("│" + padTo(hints, inner) + "│\n")
 	b.WriteString("└" + strings.Repeat("─", inner) + "┘")
 	return b.String()

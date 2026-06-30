@@ -38,6 +38,8 @@ func decodeKey(b []byte) Key {
 		return KeyRefresh
 	case 'C':
 		return KeyConfig
+	case 'Q':
+		return KeyQueue
 	case 's':
 		return KeySave
 	case 'q', 0x03: // q or Ctrl-C
@@ -131,6 +133,42 @@ func decodeKeyConfig(b []byte) Key {
 	case 's':
 		return KeySave
 	case 0x1b, 0x03: // ESC or Ctrl-C
+		return KeyEsc
+	}
+	return KeyNone
+}
+
+// decodeKeyQueue decodes keys while the queue list (not add-mode) is showing:
+// arrows / j / k navigate, 'a' adds, 'd' dispatches, 'x' removes, Enter
+// confirms, and ESC / Ctrl-C close the screen. It is distinct from decodeKey so
+// 'a'/'d'/'x' mean add/dispatch/remove only inside the queue screen.
+func decodeKeyQueue(b []byte) Key {
+	if len(b) == 0 {
+		return KeyNone
+	}
+	if len(b) >= 3 && b[0] == 0x1b && b[1] == '[' {
+		switch b[2] {
+		case 'A':
+			return KeyUp
+		case 'B':
+			return KeyDown
+		}
+		return KeyNone
+	}
+	switch b[0] {
+	case 'k':
+		return KeyUp
+	case 'j':
+		return KeyDown
+	case 'a':
+		return KeyQueueAdd
+	case 'd':
+		return KeyDispatch
+	case 'x':
+		return KeyRemove
+	case '\r', '\n':
+		return KeyEnter
+	case 0x1b, 0x03:
 		return KeyEsc
 	}
 	return KeyNone

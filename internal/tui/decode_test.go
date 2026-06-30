@@ -21,6 +21,7 @@ func TestDecodeKey(t *testing.T) {
 		{[]byte("\x1b"), KeyNone}, // bare ESC (len 1) is not a binding
 		{[]byte("x"), KeyNone},
 		{[]byte("C"), KeyConfig},
+		{[]byte("Q"), KeyQueue},
 	}
 	for _, c := range cases {
 		if got := decodeKey(c.in); got != c.want {
@@ -71,5 +72,23 @@ func TestDecodeKeyBrowse(t *testing.T) {
 		if got := decodeKeyBrowse(c.in); got != c.want {
 			t.Errorf("decodeKeyBrowse(%q) = %v, want %v", c.in, got, c.want)
 		}
+	}
+}
+
+func TestDecodeQueueKeys(t *testing.T) {
+	if decodeKey([]byte("Q")) != KeyQueue {
+		t.Error("'Q' → KeyQueue")
+	}
+}
+
+func TestDecodeKeyQueue(t *testing.T) {
+	checks := map[byte]Key{'a': KeyQueueAdd, 'd': KeyDispatch, 'x': KeyRemove, 'j': KeyDown, 'k': KeyUp}
+	for b, want := range checks {
+		if got := decodeKeyQueue([]byte{b}); got != want {
+			t.Errorf("decodeKeyQueue(%q) = %v, want %v", string(b), got, want)
+		}
+	}
+	if decodeKeyQueue([]byte{0x1b}) != KeyEsc {
+		t.Error("esc → KeyEsc")
 	}
 }

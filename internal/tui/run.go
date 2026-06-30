@@ -20,6 +20,11 @@ type Deps struct {
 
 	LoadConfig func() []ConfigField               // current ~/.rbg.conf fields
 	SaveConfig func(vals map[string]string) error // persist config fields
+
+	LoadQueue   func() []QueueItem       // current staged queue items
+	QueueAdd    func(it QueueItem) error // append an item to the queue store
+	QueueRemove func(i int) error        // remove the item at index i
+	Dispatch    func(it QueueItem) error // clone repo + launch agent there
 }
 
 // Run drives the dashboard until the user quits. It enters raw mode on the
@@ -63,7 +68,21 @@ func Run(d Deps, io Stdio) error {
 			return nil // EOF → quit
 		}
 		var act Action
-		if m.ConfigOpen && m.ConfigEditing {
+		if m.QueueOpen && m.QueueAdding {
+			// Add sub-mode: reuse the text-input decoder so 'a'/'d'/'x' are typed
+			// literally rather than triggering queue-list bindings.
+			k, r, isRune := decodeKeyInput(raw)
+			switch {
+			case isRune:
+				m = m.InputRune(r)
+			case k == KeyBackspace:
+				m = m.Backspace()
+			default:
+				m, act = Update(m, k)
+			}
+		} else if m.QueueOpen {
+			m, act = Update(m, decodeKeyQueue(raw))
+		} else if m.ConfigOpen && m.ConfigEditing {
 			// Field-edit sub-mode: reuse the text-input decoder so letters are
 			// typed literally rather than triggering config-screen bindings.
 			k, r, isRune := decodeKeyInput(raw)
@@ -156,6 +175,28 @@ func Run(d Deps, io Stdio) error {
 		case ActionSaveConfig:
 			if d.SaveConfig != nil {
 				_ = d.SaveConfig(m.ConfigValues())
+			}
+		case ActionLoadQueue:
+			if d.LoadQueue != nil {
+				m = m.SetQueue(d.LoadQueue())
+			}
+		case ActionQueueAdd:
+			if d.QueueAdd != nil {
+				_ = d.QueueAdd(m.PendingItem())
+			}
+			if d.LoadQueue != nil {
+				m = m.SetQueue(d.LoadQueue())
+			}
+		case ActionQueueRemove:
+			if d.QueueRemove != nil {
+				_ = d.QueueRemove(m.QueueSel)
+			}
+			if d.LoadQueue != nil {
+				m = m.SetQueue(d.LoadQueue())
+			}
+		case ActionDispatch:
+			if d.Dispatch != nil {
+				_ = d.Dispatch(m.DispatchItem())
 			}
 		case ActionAttach:
 			name := m.SelectedName()

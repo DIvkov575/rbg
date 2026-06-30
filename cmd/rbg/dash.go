@@ -6,6 +6,7 @@ import (
 
 	"github.com/divkov575/rbg/internal/client"
 	"github.com/divkov575/rbg/internal/config"
+	"github.com/divkov575/rbg/internal/queue"
 	"github.com/divkov575/rbg/internal/run"
 	"github.com/divkov575/rbg/internal/session"
 	"github.com/divkov575/rbg/internal/tui"
@@ -76,6 +77,35 @@ func dash(cfg *config.Config, r run.Runner) int {
 			}
 			return config.WriteConfFile(confPath(), existing)
 		},
+		LoadQueue: func() []tui.QueueItem {
+			q, _ := queue.Load(queuePath())
+			out := make([]tui.QueueItem, 0, len(q.Items))
+			for _, it := range q.Items {
+				out = append(out, tui.QueueItem{Prompt: it.Prompt, Repo: it.Repo})
+			}
+			return out
+		},
+		QueueAdd: func(it tui.QueueItem) error {
+			q, _ := queue.Load(queuePath())
+			q.Add(queue.Item{Prompt: it.Prompt, Repo: it.Repo})
+			return q.Save()
+		},
+		QueueRemove: func(i int) error {
+			q, _ := queue.Load(queuePath())
+			q.Remove(i)
+			return q.Save()
+		},
+		Dispatch: func(it tui.QueueItem) error {
+			// clone (or reuse) the repo on the desktop, then launch claude there.
+			dir, err := client.CloneRepo(cfg, r, it.Repo)
+			if err != nil {
+				return err
+			}
+			c2 := *cfg
+			c2.CWD = dir
+			client.Launch(&c2, r, io.Discard, "", it.Prompt)
+			return nil
+		},
 	}
 	if err := tui.Run(deps, tui.DefaultStdio()); err != nil {
 		return 1
@@ -85,3 +115,6 @@ func dash(cfg *config.Config, r run.Runner) int {
 
 // confPath returns the path to the rbg conf file (~/.rbg.conf).
 func confPath() string { return os.ExpandEnv("$HOME/.rbg.conf") }
+
+// queuePath returns the path to the client-only queue store (~/.rbg/queue.json).
+func queuePath() string { return os.ExpandEnv("$HOME/.rbg/queue.json") }

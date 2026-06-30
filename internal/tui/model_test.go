@@ -640,3 +640,76 @@ func TestConfigViewRenders(t *testing.T) {
 		t.Fatalf("config view missing content:\n%s", v)
 	}
 }
+
+func TestQueueKeyOpens(t *testing.T) {
+	m := sample()
+	m, act := Update(m, KeyQueue)
+	if act != ActionLoadQueue || !m.QueueOpen {
+		t.Fatalf("KeyQueue: act=%v open=%v", act, m.QueueOpen)
+	}
+}
+
+func TestQueueNavAndDispatch(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyQueue)
+	m = m.SetQueue([]QueueItem{{Prompt: "a", Repo: "r1"}, {Prompt: "b", Repo: "r2"}})
+	m, _ = Update(m, KeyDown)
+	if m.QueueSel != 1 {
+		t.Fatalf("QueueSel=%d", m.QueueSel)
+	}
+	_, act := Update(m, KeyDispatch)
+	if act != ActionDispatch {
+		t.Fatalf("KeyDispatch act=%v, want ActionDispatch", act)
+	}
+	if m.DispatchItem().Prompt != "b" {
+		t.Fatalf("DispatchItem = %+v", m.DispatchItem())
+	}
+}
+
+func TestQueueRemove(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyQueue)
+	m = m.SetQueue([]QueueItem{{Prompt: "a"}, {Prompt: "b"}})
+	_, act := Update(m, KeyRemove)
+	if act != ActionQueueRemove {
+		t.Fatalf("KeyRemove act=%v", act)
+	}
+	if m.QueueSel != 0 || m.DispatchItem().Prompt != "a" {
+		t.Fatalf("remove target wrong: sel=%d", m.QueueSel)
+	}
+}
+
+func TestQueueAddFlow(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyQueue)
+	// 'a' (add) enters prompt entry; type prompt, Enter; then repo entry; Enter → ActionQueueAdd
+	m, _ = Update(m, KeyQueueAdd)
+	if !m.QueueAdding {
+		t.Fatal("KeyQueueAdd should enter add mode")
+	}
+	for _, r := range "fix it" {
+		m = m.InputRune(r)
+	}
+	m, _ = Update(m, KeyEnter) // commit prompt, move to repo field
+	for _, r := range "my-svc" {
+		m = m.InputRune(r)
+	}
+	m, act := Update(m, KeyEnter) // commit repo → add
+	if act != ActionQueueAdd {
+		t.Fatalf("second Enter act=%v, want ActionQueueAdd", act)
+	}
+	it := m.PendingItem()
+	if it.Prompt != "fix it" || it.Repo != "my-svc" {
+		t.Fatalf("pending item = %+v", it)
+	}
+}
+
+func TestQueueViewRenders(t *testing.T) {
+	m := sample().SetSize(80, 24)
+	m, _ = Update(m, KeyQueue)
+	m = m.SetQueue([]QueueItem{{Prompt: "fix the flaky test", Repo: "my-svc"}})
+	v := View(m)
+	if !strings.Contains(v, "queue") || !strings.Contains(v, "fix the flaky test") || !strings.Contains(v, "my-svc") {
+		t.Fatalf("queue view missing content:\n%s", v)
+	}
+}
