@@ -1,83 +1,32 @@
 // Package claudecli isolates the contract with the real `claude` binary: the
-// argv we pass and the JSON shapes we parse. EVERYTHING we assume about claude
-// lives here, so the one-time manual verification has a single place to fix.
+// argv we pass to it. EVERYTHING rbg assumes about how claude is invoked lives
+// here, so the one-time real-host verification has a single place to land.
+//
+// As verified against the ASBX claude (v2.1.187) on a real desktop, rbg drives
+// claude entirely headlessly with client-generated session ids:
+//   - launch: claude -p <task> --session-id <uuid>   (no --bg → no resident
+//     process holding a session lock)
+//   - send:   claude -p <task> --resume <uuid>        (appends to the session;
+//     does not fork)
+//
+// rbg reads results from the on-disk transcript (located by session-id glob),
+// never from claude's stdout, so no --output-format flag is needed (and
+// --output-format stream-json is in fact rejected by this distribution).
 package claudecli
 
-import (
-	"encoding/json"
-	"strings"
-)
-
-// Agent is one entry from `claude agents --json`.
-type Agent struct {
-	Name      string `json:"name"`
-	SessionID string `json:"-"`
+// LaunchHeadlessArgs builds `claude -p <task> --session-id <uuid>`. The
+// client-chosen id means the agent never needs `claude agents --json` to
+// discover it, and the plain -p run leaves no resident background process, so
+// subsequent ResumeHeadlessArgs calls append cleanly.
+func LaunchHeadlessArgs(sessionID, task string) []string {
+	return []string{"-p", task, "--session-id", sessionID}
 }
 
-// agentWire tolerates the three id key spellings we might see.
-type agentWire struct {
-	Name       string `json:"name"`
-	SessionID  string `json:"sessionId"`
-	SessionSnk string `json:"session_id"`
-	ID         string `json:"id"`
-}
-
-func (w agentWire) toAgent() Agent {
-	id := w.SessionID
-	if id == "" {
-		id = w.SessionSnk
-	}
-	if id == "" {
-		id = w.ID
-	}
-	return Agent{Name: w.Name, SessionID: id}
-}
-
-// BGArgs builds `claude --bg -n <name> <task>`.
-func BGArgs(name, task string) []string {
-	return []string{"--bg", "-n", name, task}
-}
-
-// ResumeHeadlessArgs builds the headless send invocation.
+// ResumeHeadlessArgs builds `claude -p <task> --resume <uuid>`, the headless
+// send invocation. It appends to the existing transcript (does not fork). We
+// deliberately omit --output-format stream-json: that flag combination fails
+// with exit 1 on the ASBX distribution, and results are read from the
+// transcript file rather than the child's stdout.
 func ResumeHeadlessArgs(sessionID, task string) []string {
-	return []string{"-p", task, "--resume", sessionID, "--output-format", "stream-json"}
-}
-
-// AgentsListArgs builds `claude agents --json --all`.
-func AgentsListArgs() []string {
-	return []string{"agents", "--json", "--all"}
-}
-
-// ParseAgents parses bare-array or {"agents":[...]} output; garbage → empty.
-func ParseAgents(data []byte) ([]Agent, error) {
-	trimmed := strings.TrimSpace(string(data))
-	var wires []agentWire
-	if strings.HasPrefix(trimmed, "{") {
-		var wrapped struct {
-			Agents []agentWire `json:"agents"`
-		}
-		if err := json.Unmarshal([]byte(trimmed), &wrapped); err != nil {
-			return nil, nil
-		}
-		wires = wrapped.Agents
-	} else {
-		if err := json.Unmarshal([]byte(trimmed), &wires); err != nil {
-			return nil, nil
-		}
-	}
-	out := make([]Agent, 0, len(wires))
-	for _, w := range wires {
-		out = append(out, w.toAgent())
-	}
-	return out, nil
-}
-
-// FindSessionID returns the claude session id for the named agent, or "".
-func FindSessionID(agents []Agent, name string) string {
-	for _, a := range agents {
-		if a.Name == name {
-			return a.SessionID
-		}
-	}
-	return ""
+	return []string{"-p", task, "--resume", sessionID}
 }

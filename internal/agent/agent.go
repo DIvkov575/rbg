@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,11 +32,60 @@ type Agent struct {
 	StatePath  string        // ~/.rbg-agent/sessions.json
 	ClaudeHome string        // root for transcript paths (~ in prod)
 	Now        func() string // timestamp source (injectable for tests)
+	NewID      func() string // session-id generator (injectable for tests)
 	Spawn      SpawnFunc     // detached child spawner (defaults via DefaultSpawn)
 	LockDir    string        // dir for per-session lockfiles (defaults beside state)
 }
 
 const claudeBin = "claude"
+
+// newID returns a fresh session id, using the injected generator if present.
+func (a *Agent) newID() string {
+	if a.NewID != nil {
+		return a.NewID()
+	}
+	return randomUUID()
+}
+
+// randomUUID generates a v4-ish UUID from crypto/rand (glob- and shell-safe).
+func randomUUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// findTranscript locates a session's transcript JSONL by its unique id, globbing
+// across all ~/.claude/projects/*/ dirs. The real claude names each project dir
+// after its working directory, which the agent cannot predict, so a fixed path
+// is unreliable; the session id (a UUID) is the stable key. Returns "" if not
+// found or if the id is not glob-safe.
+func (a *Agent) findTranscript(claudeSessionID string) string {
+	if !validSessionID(claudeSessionID) {
+		return ""
+	}
+	pattern := filepath.Join(a.ClaudeHome, ".claude", "projects", "*", claudeSessionID+".jsonl")
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		return ""
+	}
+	return matches[0]
+}
+
+// validSessionID guards the glob pattern: claude session ids are UUID-shaped
+// ([A-Za-z0-9-]). Reject anything else so the pattern stays a literal id.
+func validSessionID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, r := range id {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-') {
+			return false
+		}
+	}
+	return true
+}
 
 // transcriptPath derives the JSONL path for a claude session id. In v2 the
 // agent owns this mapping, so no glob is ever needed.
@@ -71,16 +121,18 @@ func (a *Agent) Launch(out io.Writer, name, task string) int {
 	}
 	resolved := resolveName(store, name, task)
 
-	_, code, _ := a.Runner.Run(claudeBin, claudecli.BGArgs(resolved, task), nil)
-	if code != 0 {
-		fmt.Fprintf(out, "rbg-agent: claude --bg failed (exit %d)\n", code)
-		return 1
+	// Client-generated session id: claude -p --session-id creates a resumable
+	// session with NO resident background process, so later sends (-p --resume)
+	// append cleanly. (A --bg launch leaves a live agent that locks the session.)
+	sid := a.newID()
+
+	spawn := a.Spawn
+	if spawn == nil {
+		spawn = DefaultSpawn
 	}
-	listing, _, _ := a.Runner.Run(claudeBin, claudecli.AgentsListArgs(), nil)
-	agents, _ := claudecli.ParseAgents(listing)
-	sid := claudecli.FindSessionID(agents, resolved)
-	if sid == "" {
-		fmt.Fprintf(out, "rbg-agent: could not resolve session id for %q\n", resolved)
+	args := append([]string{claudeBin}, claudecli.LaunchHeadlessArgs(sid, task)...)
+	if _, err := spawn(args[0], args[1:], a.sendLogPath(resolved)); err != nil {
+		fmt.Fprintf(out, "rbg-agent: launch spawn failed: %v\n", err)
 		return 1
 	}
 	store.Add(session.Session{
@@ -110,6 +162,14 @@ func (a *Agent) Ls(out io.Writer) int {
 	}
 	json.NewEncoder(out).Encode(list)
 	return 0
+}
+
+// sendLogPath returns an agent-owned path for a headless send child's stdout.
+// The real claude maintains its own transcript on disk (located by Read via
+// session-id glob), so the child's stdout is just a log we keep beside our
+// state, not the transcript itself.
+func (a *Agent) sendLogPath(id string) string {
+	return filepath.Join(filepath.Dir(a.StatePath), "logs", id+".log")
 }
 
 // lockPath returns the lockfile path for a session id.
@@ -153,7 +213,7 @@ func (a *Agent) Send(out io.Writer, name, task string) int {
 		spawn = DefaultSpawn
 	}
 	args := append([]string{claudeBin}, claudecli.ResumeHeadlessArgs(sess.ClaudeSessionID, task)...)
-	_, err = spawn(args[0], args[1:], sess.TranscriptPath)
+	_, err = spawn(args[0], args[1:], a.sendLogPath(name))
 	if err != nil {
 		fmt.Fprintf(out, "rbg-agent: spawn failed: %v\n", err)
 		return 1
@@ -175,7 +235,11 @@ func (a *Agent) Read(out io.Writer, name string) int {
 		fmt.Fprintf(out, "rbg-agent: unknown agent %q\n", name)
 		return 1
 	}
-	data, err := os.ReadFile(sess.TranscriptPath)
+	path := a.findTranscript(sess.ClaudeSessionID)
+	if path == "" {
+		path = sess.TranscriptPath // fall back to the recorded path
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		// no transcript yet → nothing to render, but not an error
 		return 0
@@ -191,6 +255,9 @@ func (a *Agent) Read(out io.Writer, name string) int {
 // DefaultSpawn starts a detached child in its own process group with stdout
 // appended to stdoutPath. The child survives the parent (and the SSH session).
 func DefaultSpawn(name string, args []string, stdoutPath string) (int, error) {
+	if err := os.MkdirAll(filepath.Dir(stdoutPath), 0o755); err != nil {
+		return 0, err
+	}
 	f, err := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return 0, err
@@ -198,6 +265,11 @@ func DefaultSpawn(name string, args []string, stdoutPath string) (int, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = f
 	cmd.Stderr = f
+	// Detached child has no stdin; claude waits ~3s for stdin otherwise.
+	if devnull, derr := os.Open(os.DevNull); derr == nil {
+		cmd.Stdin = devnull
+		defer devnull.Close()
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		f.Close()
