@@ -657,9 +657,14 @@ func TestQueueNavAndDispatch(t *testing.T) {
 	if m.QueueSel != 1 {
 		t.Fatalf("QueueSel=%d", m.QueueSel)
 	}
-	_, act := Update(m, KeyDispatch)
+	// KeyDispatch now opens the preview; Enter from preview dispatches.
+	m, act := Update(m, KeyDispatch)
+	if act == ActionDispatch || !m.Previewing {
+		t.Fatalf("KeyDispatch should open preview, got act=%v previewing=%v", act, m.Previewing)
+	}
+	_, act = Update(m, KeyEnter)
 	if act != ActionDispatch {
-		t.Fatalf("KeyDispatch act=%v, want ActionDispatch", act)
+		t.Fatalf("Enter in preview act=%v, want ActionDispatch", act)
 	}
 	if m.DispatchItem().Prompt != "b" {
 		t.Fatalf("DispatchItem = %+v", m.DispatchItem())
@@ -711,5 +716,86 @@ func TestQueueViewRenders(t *testing.T) {
 	v := View(m)
 	if !strings.Contains(v, "queue") || !strings.Contains(v, "fix the flaky test") || !strings.Contains(v, "my-svc") {
 		t.Fatalf("queue view missing content:\n%s", v)
+	}
+}
+
+func TestQueueDispatchOpensPreview(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyQueue)
+	m = m.SetQueue([]QueueItem{{Prompt: "fix it", Repo: "r1"}})
+	// 'd' (dispatch) now opens the preview instead of dispatching immediately
+	m, act := Update(m, KeyDispatch)
+	if !m.Previewing {
+		t.Fatal("KeyDispatch should open the preview")
+	}
+	if act == ActionDispatch {
+		t.Fatal("opening preview must NOT dispatch yet")
+	}
+}
+
+func TestPreviewToggleLocationAndDispatch(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyQueue)
+	m = m.SetQueue([]QueueItem{{Prompt: "fix it", Repo: "r1"}})
+	m, _ = Update(m, KeyDispatch) // open preview
+	if m.PreviewLocal {
+		t.Fatal("default dispatch target should be remote")
+	}
+	m, _ = Update(m, KeyToggleLocal) // toggle to local
+	if !m.PreviewLocal {
+		t.Fatal("KeyToggleLocal should flip to local")
+	}
+	// Enter dispatches from the preview, carrying the chosen location
+	m2, act := Update(m, KeyEnter)
+	if act != ActionDispatch {
+		t.Fatalf("Enter in preview should dispatch, got %v", act)
+	}
+	if !m2.DispatchLocal() {
+		t.Fatal("dispatch should carry local=true")
+	}
+	if m2.Previewing {
+		t.Fatal("dispatch should close the preview")
+	}
+}
+
+func TestPreviewEscClosesWithoutDispatch(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyQueue)
+	m = m.SetQueue([]QueueItem{{Prompt: "fix it", Repo: "r1"}})
+	m, _ = Update(m, KeyDispatch)
+	m2, act := Update(m, KeyEsc)
+	if m2.Previewing {
+		t.Fatal("Esc should close the preview")
+	}
+	if act == ActionDispatch {
+		t.Fatal("Esc must not dispatch")
+	}
+}
+
+func TestPreviewViewShowsFullPromptAndTarget(t *testing.T) {
+	m := sample().SetSize(80, 24)
+	m, _ = Update(m, KeyQueue)
+	long := "investigate the flaky payments test and write a fix with full coverage across the suite"
+	m = m.SetQueue([]QueueItem{{Prompt: long, Repo: "github.com/me/svc"}})
+	m, _ = Update(m, KeyDispatch) // preview
+	v := View(m)
+	if !strings.Contains(v, "preview") || !strings.Contains(v, "github.com/me/svc") {
+		t.Fatalf("preview missing repo/title:\n%s", v)
+	}
+	if !strings.Contains(v, "full coverage") {
+		t.Fatalf("preview should show the FULL prompt:\n%s", v)
+	}
+	if !strings.Contains(v, "remote") {
+		t.Fatalf("preview should show the dispatch target:\n%s", v)
+	}
+}
+
+func TestStatusMessageShownInQueue(t *testing.T) {
+	m := sample().SetSize(80, 24)
+	m, _ = Update(m, KeyQueue)
+	m = m.SetQueue([]QueueItem{{Prompt: "p", Repo: "r"}})
+	m = m.SetStatus("dispatched to local: p")
+	if !strings.Contains(View(m), "dispatched to local") {
+		t.Fatalf("status not shown in queue view:\n%s", View(m))
 	}
 }

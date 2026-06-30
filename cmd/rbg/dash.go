@@ -1,8 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/divkov575/rbg/internal/client"
 	"github.com/divkov575/rbg/internal/config"
@@ -95,8 +99,11 @@ func dash(cfg *config.Config, r run.Runner) int {
 			q.Remove(i)
 			return q.Save()
 		},
-		Dispatch: func(it tui.QueueItem) error {
-			// clone (or reuse) the repo on the desktop, then launch claude there.
+		Dispatch: func(it tui.QueueItem, local bool) error {
+			if local {
+				return dispatchLocal(it)
+			}
+			// remote: clone (or reuse) the repo on the desktop, then launch there.
 			dir, err := client.CloneRepo(cfg, r, it.Repo)
 			if err != nil {
 				return err
@@ -118,3 +125,40 @@ func confPath() string { return os.ExpandEnv("$HOME/.rbg.conf") }
 
 // queuePath returns the path to the client-only queue store (~/.rbg/queue.json).
 func queuePath() string { return os.ExpandEnv("$HOME/.rbg/queue.json") }
+
+// localRepoDir resolves a queue item's repo to a local checkout directory.
+// A bare name or git URL maps to ~/workplace/<name>; an absolute/relative path
+// is used as-is.
+func localRepoDir(repo string) string {
+	if strings.HasPrefix(repo, "/") || strings.HasPrefix(repo, ".") || strings.HasPrefix(repo, "~") {
+		return os.ExpandEnv(strings.Replace(repo, "~", "$HOME", 1))
+	}
+	name := repo
+	if i := strings.LastIndexAny(name, "/:"); i >= 0 {
+		name = name[i+1:]
+	}
+	name = strings.TrimSuffix(name, ".git")
+	return os.ExpandEnv(filepath.Join("$HOME", "workplace", name))
+}
+
+// dispatchLocal runs the task with the local claude in the repo's local checkout
+// (cloning locally if absent), detached so the dashboard returns immediately.
+func dispatchLocal(it tui.QueueItem) error {
+	dir := localRepoDir(it.Repo)
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		if err := exec.Command("git", "clone", it.Repo, dir).Run(); err != nil {
+			return fmt.Errorf("local clone failed: %w", err)
+		}
+	}
+	cmd := exec.Command("claude", "-p", it.Prompt, "--dangerously-skip-permissions")
+	cmd.Dir = dir
+	if devnull, derr := os.Open(os.DevNull); derr == nil {
+		cmd.Stdin = devnull
+		defer devnull.Close()
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("local claude failed to start: %w", err)
+	}
+	go func() { _ = cmd.Wait() }() // detached; reap async
+	return nil
+}

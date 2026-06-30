@@ -144,3 +144,17 @@ func TestParse_Kill(t *testing.T) {
 		t.Fatal("kill without name should error")
 	}
 }
+
+func TestLocalRepoDir(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/DIvkov575/mymemories.git": "/workplace/mymemories",
+		"git@github.com:me/web-app.git":               "/workplace/web-app",
+		"my-svc":                                      "/workplace/my-svc",
+	}
+	for in, suffix := range cases {
+		got := localRepoDir(in)
+		if len(got) < len(suffix) || got[len(got)-len(suffix):] != suffix {
+			t.Errorf("localRepoDir(%q) = %q, want suffix %q", in, got, suffix)
+		}
+	}
+}

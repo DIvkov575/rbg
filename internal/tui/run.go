@@ -21,10 +21,10 @@ type Deps struct {
 	LoadConfig func() []ConfigField               // current ~/.rbg.conf fields
 	SaveConfig func(vals map[string]string) error // persist config fields
 
-	LoadQueue   func() []QueueItem       // current staged queue items
-	QueueAdd    func(it QueueItem) error // append an item to the queue store
-	QueueRemove func(i int) error        // remove the item at index i
-	Dispatch    func(it QueueItem) error // clone repo + launch agent there
+	LoadQueue   func() []QueueItem                   // current staged queue items
+	QueueAdd    func(it QueueItem) error             // append an item to the queue store
+	QueueRemove func(i int) error                    // remove the item at index i
+	Dispatch    func(it QueueItem, local bool) error // clone repo + launch agent (local=laptop, else desktop)
 }
 
 // Run drives the dashboard until the user quits. It enters raw mode on the
@@ -196,7 +196,16 @@ func Run(d Deps, io Stdio) error {
 			}
 		case ActionDispatch:
 			if d.Dispatch != nil {
-				_ = d.Dispatch(m.DispatchItem())
+				it := m.DispatchItem()
+				where := "remote"
+				if m.DispatchLocal() {
+					where = "local"
+				}
+				if err := d.Dispatch(it, m.DispatchLocal()); err != nil {
+					m = m.SetStatus("dispatch failed (" + where + "): " + err.Error())
+				} else {
+					m = m.SetStatus("dispatched (" + where + "): " + it.Repo)
+				}
 			}
 		case ActionAttach:
 			name := m.SelectedName()

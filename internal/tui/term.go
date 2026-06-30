@@ -166,6 +166,8 @@ func decodeKeyQueue(b []byte) Key {
 		return KeyDispatch
 	case 'x':
 		return KeyRemove
+	case 'l':
+		return KeyToggleLocal
 	case '\r', '\n':
 		return KeyEnter
 	case 0x1b, 0x03:

@@ -18,23 +18,24 @@ const (
 	KeyNone Key = iota
 	KeyUp
 	KeyDown
-	KeyAttach    // a
-	KeyRefresh   // r
-	KeyQuit      // q
-	KeyNew       // n: start a new agent (enter input mode)
-	KeyKill      // k: kill the selected agent
-	KeyEnter     // ↵ in input mode: submit
-	KeyEsc       // esc in input mode: cancel
-	KeyBackspace // backspace in input mode
-	KeyParent    // h in browse mode: go to parent dir
-	KeyChoose    // c in browse mode: choose current dir
-	KeyMkdir     // m in browse mode: make a new directory
-	KeyConfig    // C: open the config screen
-	KeySave      // s: save the config screen
-	KeyQueue     // Q: open the queue screen
-	KeyDispatch  // d (in queue): dispatch the selected item
-	KeyRemove    // x (in queue): remove the selected item
-	KeyQueueAdd  // a (in queue): add a new item
+	KeyAttach      // a
+	KeyRefresh     // r
+	KeyQuit        // q
+	KeyNew         // n: start a new agent (enter input mode)
+	KeyKill        // k: kill the selected agent
+	KeyEnter       // ↵ in input mode: submit
+	KeyEsc         // esc in input mode: cancel
+	KeyBackspace   // backspace in input mode
+	KeyParent      // h in browse mode: go to parent dir
+	KeyChoose      // c in browse mode: choose current dir
+	KeyMkdir       // m in browse mode: make a new directory
+	KeyConfig      // C: open the config screen
+	KeySave        // s: save the config screen
+	KeyQueue       // Q: open the queue screen
+	KeyDispatch    // d (in queue): dispatch the selected item
+	KeyRemove      // x (in queue): remove the selected item
+	KeyQueueAdd    // a (in queue): add a new item
+	KeyToggleLocal // l (in preview): toggle local/remote dispatch target
 )
 
 // Action is what the terminal loop must do after an Update (the model itself
@@ -116,12 +117,16 @@ type Model struct {
 	ConfigEditing bool
 
 	// Queue-screen state (a separate, mutually-exclusive screen).
-	QueueOpen   bool
-	QueueItems  []QueueItem
-	QueueSel    int
-	QueueAdding bool      // entering a new item
-	addStage    int       // 0 = typing prompt, 1 = typing repo
-	pendingItem QueueItem // accumulates the new item
+	QueueOpen     bool
+	QueueItems    []QueueItem
+	QueueSel      int
+	QueueAdding   bool      // entering a new item
+	Previewing    bool      // previewing the selected item before dispatch
+	PreviewLocal  bool      // preview target: true=local laptop, false=remote desktop
+	dispatchLocal bool      // location chosen at the moment of dispatch
+	StatusMsg     string    // transient status line (e.g. dispatch result)
+	addStage      int       // 0 = typing prompt, 1 = typing repo
+	pendingItem   QueueItem // accumulates the new item
 }
 
 // New builds a model from a session list.
@@ -248,6 +253,12 @@ func (m Model) SetQueue(items []QueueItem) Model {
 	return m
 }
 
+// DispatchLocal reports whether the most recent dispatch chose the local target.
+func (m Model) DispatchLocal() bool { return m.dispatchLocal }
+
+// SetStatus sets a transient status line shown in the queue footer area.
+func (m Model) SetStatus(msg string) Model { m.StatusMsg = msg; return m }
+
 // DispatchItem returns the highlighted queue item (zero value if none).
 func (m Model) DispatchItem() QueueItem {
 	if m.QueueSel < 0 || m.QueueSel >= len(m.QueueItems) {
@@ -262,6 +273,21 @@ func (m Model) PendingItem() QueueItem { return m.pendingItem }
 // Update applies a key, returning the new model and an Action for the loop.
 func Update(m Model, k Key) (Model, Action) {
 	if m.QueueOpen {
+		if m.Previewing {
+			switch k {
+			case KeyToggleLocal:
+				m.PreviewLocal = !m.PreviewLocal
+				return m, ActionNone
+			case KeyEnter, KeyDispatch:
+				m.Previewing = false
+				m.dispatchLocal = m.PreviewLocal
+				return m, ActionDispatch
+			case KeyEsc:
+				m.Previewing = false
+				return m, ActionNone
+			}
+			return m, ActionNone
+		}
 		if m.QueueAdding {
 			// Two-stage add: stage 0 captures the prompt, stage 1 the repo.
 			// Printable runes/backspace are applied by the loop via
@@ -303,7 +329,9 @@ func Update(m Model, k Key) (Model, Action) {
 			if len(m.QueueItems) == 0 {
 				return m, ActionNone
 			}
-			return m, ActionDispatch
+			m.Previewing = true
+			m.PreviewLocal = false // default to remote
+			return m, ActionNone
 		case KeyRemove:
 			if len(m.QueueItems) == 0 {
 				return m, ActionNone
@@ -554,6 +582,9 @@ func View(m Model) string {
 	}
 
 	if m.QueueOpen {
+		if m.Previewing {
+			return previewView(m, w, h)
+		}
 		return queueView(m, w, h)
 	}
 
@@ -740,12 +771,83 @@ func queueView(m Model, w, h int) string {
 		} else {
 			hints = " repo: " + m.Buffer + "█"
 		}
+	} else if m.StatusMsg != "" {
+		hints = " " + m.StatusMsg + "  ·  ↑/↓ a d x esc"
 	} else {
 		hints = " ↑/↓  a add  d dispatch  x remove  esc close"
 	}
 	b.WriteString("│" + padTo(hints, inner) + "│\n")
 	b.WriteString("└" + strings.Repeat("─", inner) + "┘")
 	return b.String()
+}
+
+// previewView renders the selected queue item in full (repo + complete prompt,
+// wrapped) plus the chosen dispatch target, before the user commits to running.
+func previewView(m Model, w, h int) string {
+	inner := w - 2
+	if inner < 1 {
+		inner = 1
+	}
+	bodyH := h - 4
+	if bodyH < 1 {
+		bodyH = 1
+	}
+	it := m.DispatchItem()
+	target := "remote (desktop)"
+	if m.PreviewLocal {
+		target = "local (laptop)"
+	}
+	lines := []string{
+		"repo:   " + it.Repo,
+		"target: " + target,
+		"",
+		"prompt:",
+	}
+	lines = append(lines, wrapText(it.Prompt, inner-1)...)
+
+	var b strings.Builder
+	b.WriteString("┌" + labelRule("preview", inner) + "┐\n")
+	for i := 0; i < bodyH; i++ {
+		l := ""
+		if i < len(lines) {
+			l = lines[i]
+		}
+		b.WriteString("│" + padTo(l, inner) + "│\n")
+	}
+	hints := " ↵ dispatch  l toggle local/remote  esc cancel"
+	b.WriteString("│" + padTo(hints, inner) + "│\n")
+	b.WriteString("└" + strings.Repeat("─", inner) + "┘")
+	return b.String()
+}
+
+// wrapText soft-wraps s to width w on spaces, returning display lines.
+func wrapText(s string, w int) []string {
+	if w < 1 {
+		w = 1
+	}
+	var out []string
+	for _, para := range strings.Split(s, "\n") {
+		words := strings.Fields(para)
+		if len(words) == 0 {
+			out = append(out, "")
+			continue
+		}
+		line := ""
+		for _, word := range words {
+			if line == "" {
+				line = word
+			} else if displayWidth(line)+1+displayWidth(word) <= w {
+				line += " " + word
+			} else {
+				out = append(out, line)
+				line = word
+			}
+		}
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 // browseView renders the directory-browser overlay: a framed list of
