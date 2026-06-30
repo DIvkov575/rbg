@@ -153,3 +153,47 @@ def test_shell_metacharacters_in_task_are_quoted_not_executed(env, tmp_path):
             break
         time.sleep(0.25)
     assert "touch ~/PWNED" in seen
+
+
+@needs_env
+def test_raw_routing_works(env, tmp_path):
+    """After the CLI cleanup, `rbg raw ls` must still reach the agent."""
+    sim, rbg = env
+    res = run_rbg(sim, rbg, tmp_path / "ch", "raw", "ls")
+    assert res.returncode == 0, res.stderr
+
+
+@needs_env
+def test_agent_clone_verb_over_ssh(env, tmp_path):
+    """The agent `clone` verb clones a local bare repo on the (sandboxed) desktop.
+
+    Uses a local bare repo (no network/auth) created under the sandbox HOME, then
+    drives `rbg-agent clone --repo <bare>` over the sim ssh and asserts the clone
+    dir is returned and exists.
+    """
+    import json
+    import subprocess
+    sim, rbg = env
+    home = sim.home  # the sandbox desktop HOME
+    bare = os.path.join(home, "origin.git")
+    seed = os.path.join(home, "seed")
+    subprocess.run(["git", "init", "-q", "--bare", bare], check=True, capture_output=True)
+    subprocess.run(["git", "init", "-q", seed], check=True, capture_output=True)
+    with open(os.path.join(seed, "README.md"), "w") as f:
+        f.write("hi\n")
+    subprocess.run(["git", "-C", seed, "add", "."], check=True, capture_output=True)
+    subprocess.run(["git", "-C", seed, "-c", "user.email=a@b.c", "-c", "user.name=t",
+                    "commit", "-qm", "x"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", seed, "push", "-q", bare, "HEAD:master"], check=True, capture_output=True)
+
+    # drive the agent clone verb directly over the sim ssh (PATH has rbg-agent)
+    ssh_base = [
+        "ssh", "-i", sim.client_key, "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null", "-p", str(sim.port), sim.host,
+    ]
+    out = subprocess.run(ssh_base + [f"rbg-agent clone --repo {bare}"],
+                         capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    resp = json.loads(out.stdout)
+    assert "dir" in resp, resp
+    assert os.path.isdir(os.path.join(resp["dir"], ".git")), resp["dir"]
