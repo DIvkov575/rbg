@@ -165,20 +165,25 @@ func TestViewFallsBackWhenNoSize(t *testing.T) {
 	}
 }
 
+// enterInput drives the two-phase new-agent flow up to task-input mode: open
+// the browser ('n'), then choose the current dir ('c'). After Task D, KeyNew no
+// longer enters input mode directly.
+func enterInput(m Model) Model {
+	m, _ = Update(m, KeyNew)     // phase 1: browser
+	m = m.SetBrowse("", "", nil) // loop would populate; empty is fine
+	m, _ = Update(m, KeyChoose)  // phase 2: input mode
+	return m
+}
+
 func TestNewKeyEntersInputMode(t *testing.T) {
-	m := sample()
-	m, act := Update(m, KeyNew)
-	if act != ActionNone {
-		t.Fatalf("entering input should not emit an action yet, got %v", act)
-	}
+	m := enterInput(sample())
 	if !m.Input {
-		t.Fatal("KeyNew should enter input mode")
+		t.Fatal("choosing a dir should enter input mode")
 	}
 }
 
 func TestInputModeTypingAndSubmit(t *testing.T) {
-	m := sample()
-	m, _ = Update(m, KeyNew)
+	m := enterInput(sample())
 	for _, r := range "fix bug" {
 		m = m.InputRune(r)
 	}
@@ -198,8 +203,7 @@ func TestInputModeTypingAndSubmit(t *testing.T) {
 }
 
 func TestInputModeBackspaceAndEscape(t *testing.T) {
-	m := sample()
-	m, _ = Update(m, KeyNew)
+	m := enterInput(sample())
 	m = m.InputRune('a').InputRune('b')
 	m = m.Backspace()
 	if m.Buffer != "a" {
@@ -215,8 +219,7 @@ func TestInputModeBackspaceAndEscape(t *testing.T) {
 }
 
 func TestEmptySubmitDoesNotLaunch(t *testing.T) {
-	m := sample()
-	m, _ = Update(m, KeyNew)
+	m := enterInput(sample())
 	m, act := Update(m, KeyEnter) // empty buffer
 	if act == ActionLaunch {
 		t.Fatal("empty task must not launch")
@@ -241,8 +244,7 @@ func TestKillEmptyListNoop(t *testing.T) {
 }
 
 func TestInputModeIgnoresNavKeys(t *testing.T) {
-	m := sample()
-	m, _ = Update(m, KeyNew)
+	m := enterInput(sample())
 	before := m.Selected
 	m, _ = Update(m, KeyDown) // in input mode, nav must not move selection
 	if m.Selected != before {
@@ -251,8 +253,7 @@ func TestInputModeIgnoresNavKeys(t *testing.T) {
 }
 
 func TestViewShowsInputPrompt(t *testing.T) {
-	m := sample().SetSize(80, 24)
-	m, _ = Update(m, KeyNew)
+	m := enterInput(sample().SetSize(80, 24))
 	m = m.InputRune('h').InputRune('i')
 	v := View(m)
 	if !strings.Contains(v, "new task:") || !strings.Contains(v, "hi") {
@@ -265,5 +266,191 @@ func TestViewKeyHintsIncludeNewAndKill(t *testing.T) {
 	v := View(m)
 	if !strings.Contains(v, "n new") || !strings.Contains(v, "k kill") {
 		t.Fatalf("key hints missing n/k:\n%s", v)
+	}
+}
+
+// --- Task D: directory browser before task input ---
+
+func TestNewKeyEntersBrowsing(t *testing.T) {
+	m := sample()
+	m, act := Update(m, KeyNew)
+	if !m.Browsing {
+		t.Fatal("KeyNew should enter browsing mode")
+	}
+	if m.Input {
+		t.Fatal("KeyNew should NOT enter input mode directly")
+	}
+	if act != ActionBrowse {
+		t.Fatalf("KeyNew action = %v, want ActionBrowse", act)
+	}
+}
+
+func TestSetBrowsePopulatesEntries(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/home/u", "/home", []DirItem{
+		{Name: "proj", Path: "/home/u/proj"},
+		{Name: "docs", Path: "/home/u/docs"},
+	})
+	if m.BrowseDir != "/home/u" || m.BrowseParent != "/home" {
+		t.Fatalf("dir/parent = %q/%q", m.BrowseDir, m.BrowseParent)
+	}
+	if len(m.BrowseEntries) != 2 || m.BrowseEntries[0].Name != "proj" {
+		t.Fatalf("entries = %+v", m.BrowseEntries)
+	}
+	if m.BrowseSel != 0 {
+		t.Fatalf("BrowseSel should reset to 0, got %d", m.BrowseSel)
+	}
+}
+
+func TestBrowseUpDownClamp(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/d", "/", []DirItem{
+		{Name: "a", Path: "/d/a"},
+		{Name: "b", Path: "/d/b"},
+	})
+	m, _ = Update(m, KeyUp) // clamp at top
+	if m.BrowseSel != 0 {
+		t.Fatalf("up at top should clamp, got %d", m.BrowseSel)
+	}
+	m, _ = Update(m, KeyDown)
+	if m.BrowseSel != 1 {
+		t.Fatalf("down should move, got %d", m.BrowseSel)
+	}
+	m, _ = Update(m, KeyDown) // clamp at bottom
+	if m.BrowseSel != 1 {
+		t.Fatalf("down at bottom should clamp, got %d", m.BrowseSel)
+	}
+}
+
+func TestBrowseEnterDescends(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/d", "/", []DirItem{
+		{Name: "a", Path: "/d/a"},
+		{Name: "b", Path: "/d/b"},
+	})
+	m, _ = Update(m, KeyDown) // select b
+	m, act := Update(m, KeyEnter)
+	if act != ActionBrowse {
+		t.Fatalf("Enter on entry action = %v, want ActionBrowse", act)
+	}
+	if m.BrowseDir != "/d/b" {
+		t.Fatalf("descend should set BrowseDir to entry path, got %q", m.BrowseDir)
+	}
+	if !m.Browsing {
+		t.Fatal("still browsing after descend")
+	}
+}
+
+func TestBrowseEnterEmptyListNoop(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/d", "/", nil)
+	_, act := Update(m, KeyEnter)
+	if act != ActionNone {
+		t.Fatalf("Enter on empty browse list = %v, want ActionNone", act)
+	}
+}
+
+func TestBrowseParentGoesUp(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/d/sub", "/d", []DirItem{{Name: "x", Path: "/d/sub/x"}})
+	m, act := Update(m, KeyParent)
+	if act != ActionBrowse {
+		t.Fatalf("KeyParent action = %v, want ActionBrowse", act)
+	}
+	if m.BrowseDir != "/d" {
+		t.Fatalf("parent should set BrowseDir to parent, got %q", m.BrowseDir)
+	}
+}
+
+func TestBrowseChooseEntersInput(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/d/sub", "/d", []DirItem{{Name: "x", Path: "/d/sub/x"}})
+	m, act := Update(m, KeyChoose)
+	if act != ActionNone {
+		t.Fatalf("KeyChoose action = %v, want ActionNone", act)
+	}
+	if m.Browsing {
+		t.Fatal("choose should exit browsing")
+	}
+	if !m.Input {
+		t.Fatal("choose should enter input mode")
+	}
+	if m.ChosenDir() != "/d/sub" {
+		t.Fatalf("ChosenDir = %q, want /d/sub", m.ChosenDir())
+	}
+	if m.Buffer != "" {
+		t.Fatalf("buffer should be empty on entering input, got %q", m.Buffer)
+	}
+}
+
+func TestBrowseEscCancels(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/d", "/", []DirItem{{Name: "x", Path: "/d/x"}})
+	m, act := Update(m, KeyEsc)
+	if act != ActionNone {
+		t.Fatalf("Esc in browse action = %v, want ActionNone", act)
+	}
+	if m.Browsing || m.Input {
+		t.Fatal("Esc should cancel the whole flow")
+	}
+}
+
+func TestChooseThenTypeThenLaunch(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/work/proj", "/work", nil)
+	m, _ = Update(m, KeyChoose)
+	for _, r := range "do it" {
+		m = m.InputRune(r)
+	}
+	m, act := Update(m, KeyEnter)
+	if act != ActionLaunch {
+		t.Fatalf("Enter action = %v, want ActionLaunch", act)
+	}
+	if m.LaunchTask() != "do it" {
+		t.Fatalf("LaunchTask = %q", m.LaunchTask())
+	}
+	if m.ChosenDir() != "/work/proj" {
+		t.Fatalf("ChosenDir = %q, want /work/proj", m.ChosenDir())
+	}
+}
+
+func TestViewShowsBrowser(t *testing.T) {
+	m := sample().SetSize(80, 24)
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/home/u", "/home", []DirItem{
+		{Name: "proj", Path: "/home/u/proj"},
+	})
+	v := View(m)
+	if !strings.Contains(v, "proj") {
+		t.Fatalf("browser entry not shown:\n%s", v)
+	}
+	if !strings.Contains(v, "/home/u") {
+		t.Fatalf("browse dir title not shown:\n%s", v)
+	}
+	if !strings.Contains(v, "choose") {
+		t.Fatalf("browser footer hint not shown:\n%s", v)
+	}
+}
+
+func TestViewShowsChosenDirInInputPrompt(t *testing.T) {
+	m := sample().SetSize(80, 24)
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/work/proj", "/work", nil)
+	m, _ = Update(m, KeyChoose)
+	m = m.InputRune('h').InputRune('i')
+	v := View(m)
+	if !strings.Contains(v, "/work/proj") {
+		t.Fatalf("chosen dir not shown in input prompt:\n%s", v)
+	}
+	if !strings.Contains(v, "new task:") || !strings.Contains(v, "hi") {
+		t.Fatalf("input prompt missing:\n%s", v)
 	}
 }

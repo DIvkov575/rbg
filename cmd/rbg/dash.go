@@ -26,14 +26,31 @@ func dash(cfg *config.Config, r run.Runner) int {
 			}
 			return nil
 		},
-		Launch: func(task string) error {
-			// name auto-derived by the agent (empty name).
-			client.Launch(cfg, r, io.Discard, "", task)
+		Launch: func(dir, task string) error {
+			// name auto-derived by the agent (empty name). A chosen dir is
+			// applied via a per-call config copy whose CWD → agent --cwd →
+			// LaunchDir, reusing the Task A working-dir path.
+			c2 := *cfg
+			if dir != "" {
+				c2.CWD = dir
+			}
+			client.Launch(&c2, r, io.Discard, "", task)
 			return nil
 		},
 		Kill: func(name string) error {
 			client.Kill(cfg, r, io.Discard, name)
 			return nil
+		},
+		Dirs: func(dir string) (string, string, []tui.DirItem, error) {
+			listing, err := client.FetchDirs(cfg, r, dir)
+			if err != nil {
+				return "", "", nil, err
+			}
+			items := make([]tui.DirItem, len(listing.Entries))
+			for i, e := range listing.Entries {
+				items[i] = tui.DirItem{Name: e.Name, Path: e.Path}
+			}
+			return listing.Dir, listing.Parent, items, nil
 		},
 	}
 	if err := tui.Run(deps, tui.DefaultStdio()); err != nil {

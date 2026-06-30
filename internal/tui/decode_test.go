@@ -42,3 +42,26 @@ func TestDecodeKeyInput(t *testing.T) {
 		t.Errorf("printable should return rune: k=%v r=%q isR=%v", k, r, isR)
 	}
 }
+
+func TestDecodeKeyBrowse(t *testing.T) {
+	cases := []struct {
+		in   []byte
+		want Key
+	}{
+		{[]byte("\x1b[A"), KeyUp},
+		{[]byte("\x1b[B"), KeyDown},
+		{[]byte("k"), KeyUp},
+		{[]byte("j"), KeyDown},
+		{[]byte("\r"), KeyEnter},
+		{[]byte("h"), KeyParent},
+		{[]byte("c"), KeyChoose},
+		{[]byte("\x1b"), KeyEsc},
+		{[]byte("\x03"), KeyEsc},
+		{[]byte("z"), KeyNone},
+	}
+	for _, c := range cases {
+		if got := decodeKeyBrowse(c.in); got != c.want {
+			t.Errorf("decodeKeyBrowse(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}

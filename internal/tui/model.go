@@ -26,6 +26,8 @@ const (
 	KeyEnter     // ↵ in input mode: submit
 	KeyEsc       // esc in input mode: cancel
 	KeyBackspace // backspace in input mode
+	KeyParent    // h in browse mode: go to parent dir
+	KeyChoose    // c in browse mode: choose current dir
 )
 
 // Action is what the terminal loop must do after an Update (the model itself
@@ -38,9 +40,18 @@ const (
 	ActionAttach
 	ActionRefresh
 	ActionQuit
-	ActionLaunch // launch m.LaunchTask()
+	ActionLaunch // launch m.LaunchTask() in m.ChosenDir()
 	ActionKill   // kill m.SelectedName()
+	ActionBrowse // (re)list m.BrowseDir into the model via SetBrowse
 )
+
+// DirItem is one browsable subdirectory. It mirrors client.DirEntry but lives in
+// package tui so the pure model never imports the client package; the loop
+// converts client.DirEntry → DirItem.
+type DirItem struct {
+	Name string
+	Path string
+}
 
 const (
 	fallbackWidth  = 80
@@ -62,6 +73,14 @@ type Model struct {
 	Input      bool   // in task-input (new-agent) mode
 	Buffer     string // task text being typed
 	launchTask string // task captured at submit, read by the loop
+
+	// Directory-browser (phase 1 of the new-agent flow) state.
+	Browsing      bool      // in directory-browser mode
+	BrowseDir     string    // the directory currently listed
+	BrowseParent  string    // its parent (for navigating up)
+	BrowseEntries []DirItem // visible subdirectories
+	BrowseSel     int       // highlighted entry
+	chosenDir     string    // dir chosen for the launch (read by the loop)
 }
 
 // New builds a model from a session list.
@@ -127,8 +146,56 @@ func (m Model) Backspace() Model {
 // LaunchTask returns the task captured by the most recent submit.
 func (m Model) LaunchTask() string { return m.launchTask }
 
+// ChosenDir returns the directory chosen in the browser for the next launch
+// ("" means the agent picks its default).
+func (m Model) ChosenDir() string { return m.chosenDir }
+
+// SetBrowse records a directory listing fetched by the loop and resets the
+// selection to the top.
+func (m Model) SetBrowse(dir, parent string, items []DirItem) Model {
+	m.BrowseDir = dir
+	m.BrowseParent = parent
+	m.BrowseEntries = items
+	m.BrowseSel = 0
+	return m
+}
+
 // Update applies a key, returning the new model and an Action for the loop.
 func Update(m Model, k Key) (Model, Action) {
+	if m.Browsing {
+		switch k {
+		case KeyUp:
+			if m.BrowseSel > 0 {
+				m.BrowseSel--
+			}
+			return m, ActionNone
+		case KeyDown:
+			if m.BrowseSel < len(m.BrowseEntries)-1 {
+				m.BrowseSel++
+			}
+			return m, ActionNone
+		case KeyEnter:
+			if len(m.BrowseEntries) == 0 ||
+				m.BrowseSel < 0 || m.BrowseSel >= len(m.BrowseEntries) {
+				return m, ActionNone
+			}
+			m.BrowseDir = m.BrowseEntries[m.BrowseSel].Path
+			return m, ActionBrowse // loop re-lists the descended dir
+		case KeyParent:
+			m.BrowseDir = m.BrowseParent
+			return m, ActionBrowse
+		case KeyChoose:
+			m.Browsing = false
+			m.chosenDir = m.BrowseDir
+			m.Input = true
+			m.Buffer = ""
+			return m, ActionNone
+		case KeyEsc:
+			m.Browsing = false
+			return m, ActionNone
+		}
+		return m, ActionNone
+	}
 	if m.Input {
 		switch k {
 		case KeyEnter:
@@ -151,9 +218,13 @@ func Update(m Model, k Key) (Model, Action) {
 	}
 	switch k {
 	case KeyNew:
-		m.Input = true
-		m.Buffer = ""
-		return m, ActionNone
+		// phase 1: open the directory browser starting from the agent's
+		// default dir (empty BrowseDir → loop asks the agent to resolve).
+		m.Browsing = true
+		m.BrowseDir = ""
+		m.BrowseSel = 0
+		m.chosenDir = ""
+		return m, ActionBrowse
 	case KeyKill:
 		if m.SelectedName() == "" {
 			return m, ActionNone
@@ -248,6 +319,10 @@ func View(m Model) string {
 		h = fallbackHeight
 	}
 
+	if m.Browsing {
+		return browseView(m, w, h)
+	}
+
 	// Layout: outer frame is w wide. Two panes separated by a vertical rule.
 	// listW chosen from the longest "name age" plus padding, clamped.
 	listW := minListWidth
@@ -298,7 +373,11 @@ func View(m Model) string {
 	inner := listW + transW + 1
 	var hints string
 	if m.Input {
-		hints = " new task: " + m.Buffer + "█"
+		if m.chosenDir != "" {
+			hints = " in " + m.chosenDir + " — new task: " + m.Buffer + "█"
+		} else {
+			hints = " new task: " + m.Buffer + "█"
+		}
 	} else {
 		hints = " ↑/↓ select  n new  k kill  a attach  r refresh  q quit"
 	}
@@ -331,4 +410,49 @@ func listLines(m Model) []string {
 		out = []string{"  (no agents)"}
 	}
 	return out
+}
+
+// browseView renders the directory-browser overlay: a framed list of
+// subdirectories with the ›-marker on BrowseSel, the current dir as a title,
+// and a footer of browse keybindings.
+func browseView(m Model, w, h int) string {
+	inner := w - 2
+	if inner < 1 {
+		inner = 1
+	}
+	bodyH := h - 4 // title rule, footer row, two borders
+	if bodyH < 1 {
+		bodyH = 1
+	}
+
+	title := m.BrowseDir
+	if title == "" {
+		title = "(default)"
+	}
+
+	lines := make([]string, 0, len(m.BrowseEntries))
+	for i, e := range m.BrowseEntries {
+		marker := "  "
+		if i == m.BrowseSel {
+			marker = "› "
+		}
+		lines = append(lines, marker+e.Name+"/")
+	}
+	if len(lines) == 0 {
+		lines = []string{"  (no subdirectories)"}
+	}
+
+	var b strings.Builder
+	b.WriteString("┌" + labelRule("choose dir: "+title, inner) + "┐\n")
+	for i := 0; i < bodyH; i++ {
+		l := ""
+		if i < len(lines) {
+			l = lines[i]
+		}
+		b.WriteString("│" + padTo(l, inner) + "│\n")
+	}
+	hints := " ↑/↓  ↵ open  h up  c choose  esc cancel"
+	b.WriteString("│" + padTo(hints, inner) + "│\n")
+	b.WriteString("└" + strings.Repeat("─", inner) + "┘")
+	return b.String()
 }

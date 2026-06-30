@@ -9,12 +9,13 @@ import (
 
 // Deps are the loop's collaborators, injected so the loop stays thin.
 type Deps struct {
-	Fetch      func() ([]session.Session, error) // list agents
-	Transcript func(name string) (string, error) // rendered transcript
-	Attach     func(name string) error           // hand terminal to claude
-	Launch     func(task string) error           // spawn a new agent
-	Kill       func(name string) error           // forget/terminate an agent
-	Now        func() string                     // RFC3339 timestamp (defaults to time.Now)
+	Fetch      func() ([]session.Session, error)                   // list agents
+	Transcript func(name string) (string, error)                   // rendered transcript
+	Attach     func(name string) error                             // hand terminal to claude
+	Launch     func(dir, task string) error                        // spawn a new agent in dir
+	Kill       func(name string) error                             // forget/terminate an agent
+	Dirs       func(dir string) (string, string, []DirItem, error) // list subdirs: returns dir, parent, entries
+	Now        func() string                                       // RFC3339 timestamp (defaults to time.Now)
 }
 
 // Run drives the dashboard until the user quits. It enters raw mode on the
@@ -58,7 +59,9 @@ func Run(d Deps, io Stdio) error {
 			return nil // EOF → quit
 		}
 		var act Action
-		if m.Input {
+		if m.Browsing {
+			m, act = Update(m, decodeKeyBrowse(raw))
+		} else if m.Input {
 			k, r, isRune := decodeKeyInput(raw)
 			switch {
 			case isRune:
@@ -82,9 +85,15 @@ func Run(d Deps, io Stdio) error {
 			if s, err := d.Fetch(); err == nil {
 				m = loadSelected(m.SetSessions(s))
 			}
+		case ActionBrowse:
+			if d.Dirs != nil {
+				if dir, parent, items, err := d.Dirs(m.BrowseDir); err == nil {
+					m = m.SetBrowse(dir, parent, items)
+				}
+			}
 		case ActionLaunch:
 			if d.Launch != nil {
-				_ = d.Launch(m.LaunchTask())
+				_ = d.Launch(m.ChosenDir(), m.LaunchTask())
 			}
 			if s, err := d.Fetch(); err == nil {
 				m = m.SetSessions(s)

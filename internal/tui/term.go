@@ -66,6 +66,39 @@ func decodeKeyInput(b []byte) (Key, rune, bool) {
 	return KeyNone, 0, false
 }
 
+// decodeKeyBrowse decodes a raw chunk while the dashboard is in the directory-
+// browser mode: arrows / j / k navigate, Enter descends, 'h' goes to the parent,
+// 'c' chooses the current dir, and ESC / Ctrl-C cancel the flow.
+func decodeKeyBrowse(b []byte) Key {
+	if len(b) == 0 {
+		return KeyNone
+	}
+	if len(b) >= 3 && b[0] == 0x1b && b[1] == '[' {
+		switch b[2] {
+		case 'A':
+			return KeyUp
+		case 'B':
+			return KeyDown
+		}
+		return KeyNone
+	}
+	switch b[0] {
+	case 'k':
+		return KeyUp
+	case 'j':
+		return KeyDown
+	case '\r', '\n':
+		return KeyEnter
+	case 'h':
+		return KeyParent
+	case 'c':
+		return KeyChoose
+	case 0x1b, 0x03: // ESC or Ctrl-C
+		return KeyEsc
+	}
+	return KeyNone
+}
+
 const clearScreen = "\x1b[2J\x1b[H" // clear + cursor home
 
 // draw renders the model to w, clearing first.
