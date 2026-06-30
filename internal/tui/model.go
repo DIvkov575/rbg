@@ -28,6 +28,7 @@ const (
 	KeyBackspace // backspace in input mode
 	KeyParent    // h in browse mode: go to parent dir
 	KeyChoose    // c in browse mode: choose current dir
+	KeyMkdir     // m in browse mode: make a new directory
 )
 
 // Action is what the terminal loop must do after an Update (the model itself
@@ -43,6 +44,7 @@ const (
 	ActionLaunch // launch m.LaunchTask() in m.ChosenDir()
 	ActionKill   // kill m.SelectedName()
 	ActionBrowse // (re)list m.BrowseDir into the model via SetBrowse
+	ActionMkdir  // create BrowseDir/DirName(), then descend + re-list
 )
 
 // DirItem is one browsable subdirectory. It mirrors client.DirEntry but lives in
@@ -81,6 +83,7 @@ type Model struct {
 	BrowseEntries []DirItem // visible subdirectories
 	BrowseSel     int       // highlighted entry
 	chosenDir     string    // dir chosen for the launch (read by the loop)
+	MakingDir     bool      // name-entry sub-mode within browsing (typing a new dir name)
 }
 
 // New builds a model from a session list.
@@ -146,6 +149,20 @@ func (m Model) Backspace() Model {
 // LaunchTask returns the task captured by the most recent submit.
 func (m Model) LaunchTask() string { return m.launchTask }
 
+// DirName returns the directory name typed in the making-dir sub-mode (the
+// shared Buffer, trimmed of surrounding whitespace).
+func (m Model) DirName() string { return strings.TrimSpace(m.Buffer) }
+
+// EnteredDir descends the browser into path (a just-created directory) and
+// exits the making-dir sub-mode, clearing the name buffer. The loop then
+// re-lists BrowseDir via ActionBrowse semantics.
+func (m Model) EnteredDir(path string) Model {
+	m.BrowseDir = path
+	m.MakingDir = false
+	m.Buffer = ""
+	return m
+}
+
 // ChosenDir returns the directory chosen in the browser for the next launch
 // ("" means the agent picks its default).
 func (m Model) ChosenDir() string { return m.chosenDir }
@@ -163,7 +180,29 @@ func (m Model) SetBrowse(dir, parent string, items []DirItem) Model {
 // Update applies a key, returning the new model and an Action for the loop.
 func Update(m Model, k Key) (Model, Action) {
 	if m.Browsing {
+		if m.MakingDir {
+			// Name-entry sub-mode. Printable runes/backspace are applied by the
+			// loop via InputRune/Backspace; only Enter/Esc reach Update here.
+			switch k {
+			case KeyEnter:
+				if m.DirName() == "" {
+					m.MakingDir = false
+					m.Buffer = ""
+					return m, ActionNone // empty name cancels
+				}
+				return m, ActionMkdir
+			case KeyEsc:
+				m.MakingDir = false
+				m.Buffer = ""
+				return m, ActionNone
+			}
+			return m, ActionNone
+		}
 		switch k {
+		case KeyMkdir:
+			m.MakingDir = true
+			m.Buffer = ""
+			return m, ActionNone
 		case KeyUp:
 			if m.BrowseSel > 0 {
 				m.BrowseSel--
@@ -451,7 +490,12 @@ func browseView(m Model, w, h int) string {
 		}
 		b.WriteString("│" + padTo(l, inner) + "│\n")
 	}
-	hints := " ↑/↓  ↵ open  h up  c choose  esc cancel"
+	var hints string
+	if m.MakingDir {
+		hints = " new dir: " + m.Buffer + "█"
+	} else {
+		hints = " ↑/↓  ↵ open  h up  c choose  m new-dir  esc cancel"
+	}
 	b.WriteString("│" + padTo(hints, inner) + "│\n")
 	b.WriteString("└" + strings.Repeat("─", inner) + "┘")
 	return b.String()

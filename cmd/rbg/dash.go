@@ -52,6 +52,9 @@ func dash(cfg *config.Config, r run.Runner) int {
 			}
 			return listing.Dir, listing.Parent, items, nil
 		},
+		MakeDir: func(dir string) (string, error) {
+			return client.MakeDir(cfg, r, dir)
+		},
 	}
 	if err := tui.Run(deps, tui.DefaultStdio()); err != nil {
 		return 1

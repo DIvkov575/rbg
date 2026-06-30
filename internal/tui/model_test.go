@@ -454,3 +454,128 @@ func TestViewShowsChosenDirInInputPrompt(t *testing.T) {
 		t.Fatalf("input prompt missing:\n%s", v)
 	}
 }
+
+func TestBrowseMkdirEntersMakingDir(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/d", "/", []DirItem{{Name: "x", Path: "/d/x"}})
+	m = m.InputRune('z') // stale buffer should be cleared on entering making-dir
+	m, act := Update(m, KeyMkdir)
+	if act != ActionNone {
+		t.Fatalf("KeyMkdir action = %v, want ActionNone", act)
+	}
+	if !m.MakingDir {
+		t.Fatal("KeyMkdir should enter making-dir sub-mode")
+	}
+	if !m.Browsing {
+		t.Fatal("making-dir is a sub-mode of browsing; Browsing should stay true")
+	}
+	if m.DirName() != "" {
+		t.Fatalf("name buffer should be cleared, got %q", m.DirName())
+	}
+}
+
+func TestMakingDirTypingBuildsName(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/d", "/", nil)
+	m, _ = Update(m, KeyMkdir)
+	for _, r := range "feature" {
+		m = m.InputRune(r)
+	}
+	if m.DirName() != "feature" {
+		t.Fatalf("DirName = %q, want feature", m.DirName())
+	}
+}
+
+func TestMakingDirEnterNonEmptyYieldsMkdir(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/d", "/", nil)
+	m, _ = Update(m, KeyMkdir)
+	for _, r := range "sub" {
+		m = m.InputRune(r)
+	}
+	m, act := Update(m, KeyEnter)
+	if act != ActionMkdir {
+		t.Fatalf("Enter with non-empty name action = %v, want ActionMkdir", act)
+	}
+}
+
+func TestMakingDirEnterEmptyCancels(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/d", "/", nil)
+	m, _ = Update(m, KeyMkdir)
+	m, act := Update(m, KeyEnter)
+	if act != ActionNone {
+		t.Fatalf("empty Enter action = %v, want ActionNone", act)
+	}
+	if m.MakingDir {
+		t.Fatal("empty Enter should exit making-dir mode")
+	}
+	if !m.Browsing {
+		t.Fatal("should remain browsing after empty Enter")
+	}
+}
+
+func TestMakingDirEscCancels(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/d", "/", nil)
+	m, _ = Update(m, KeyMkdir)
+	m = m.InputRune('x')
+	m, act := Update(m, KeyEsc)
+	if act != ActionNone {
+		t.Fatalf("Esc in making-dir action = %v, want ActionNone", act)
+	}
+	if m.MakingDir {
+		t.Fatal("Esc should exit making-dir mode")
+	}
+	if !m.Browsing {
+		t.Fatal("Esc should stay in browsing")
+	}
+	if m.DirName() != "" {
+		t.Fatalf("Esc should clear name buffer, got %q", m.DirName())
+	}
+}
+
+func TestEnteredDirDescendsAndExitsMakingDir(t *testing.T) {
+	m := sample()
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/d", "/", nil)
+	m, _ = Update(m, KeyMkdir)
+	m = m.InputRune('a')
+	m = m.EnteredDir("/d/a")
+	if m.BrowseDir != "/d/a" {
+		t.Fatalf("EnteredDir BrowseDir = %q, want /d/a", m.BrowseDir)
+	}
+	if m.MakingDir {
+		t.Fatal("EnteredDir should exit making-dir mode")
+	}
+	if m.DirName() != "" {
+		t.Fatalf("EnteredDir should clear name buffer, got %q", m.DirName())
+	}
+}
+
+func TestViewShowsMkdirPrompt(t *testing.T) {
+	m := sample().SetSize(80, 24)
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/home/u", "/home", nil)
+	m, _ = Update(m, KeyMkdir)
+	m = m.InputRune('n').InputRune('d')
+	v := View(m)
+	if !strings.Contains(v, "new dir:") || !strings.Contains(v, "nd") {
+		t.Fatalf("mkdir prompt missing:\n%s", v)
+	}
+}
+
+func TestBrowseFooterMentionsMkdir(t *testing.T) {
+	m := sample().SetSize(80, 24)
+	m, _ = Update(m, KeyNew)
+	m = m.SetBrowse("/home/u", "/home", nil)
+	v := View(m)
+	if !strings.Contains(v, "new-dir") {
+		t.Fatalf("browser footer should mention new-dir:\n%s", v)
+	}
+}

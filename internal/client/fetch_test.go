@@ -94,3 +94,29 @@ func TestFetchDirs_UnreachableErrors(t *testing.T) {
 		t.Fatal("expected error when ssh unreachable")
 	}
 }
+
+func TestMakeDir_ParsesDir(t *testing.T) {
+	canned := `{"dir":"/home/u/proj/new"}`
+	r := &run.Recording{
+		BySubstring: map[string]run.Result{"mkdir": {Stdout: []byte(canned)}},
+		Default:     run.Result{Code: 0},
+	}
+	dir, err := MakeDir(cfg(), r, "/home/u/proj/new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != "/home/u/proj/new" {
+		t.Fatalf("dir = %q", dir)
+	}
+	joined := strings.Join(r.Calls[len(r.Calls)-1].Args, " ")
+	if !strings.Contains(joined, "mkdir") || !strings.Contains(joined, "/home/u/proj/new") {
+		t.Fatalf("mkdir call = %q", joined)
+	}
+}
+
+func TestMakeDir_UnreachableErrors(t *testing.T) {
+	r := &run.Recording{Default: run.Result{Code: 255}}
+	if _, err := MakeDir(cfg(), r, "/home/u/proj/new"); err == nil {
+		t.Fatal("expected error when ssh unreachable")
+	}
+}

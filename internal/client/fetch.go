@@ -64,3 +64,20 @@ func FetchDirs(c *config.Config, r run.Runner, dir string) (DirListing, error) {
 	}
 	return listing, nil
 }
+
+// MakeDir creates dir on the desktop via the agent's `mkdir` verb and returns
+// the created absolute path. A nonzero exit (including ssh 255) is reported as
+// an error.
+func MakeDir(c *config.Config, r run.Runner, dir string) (string, error) {
+	body, code := runAgent(c, r, "mkdir", []string{"--dir", dir})
+	if code != 0 {
+		return "", fmt.Errorf("mkdir failed (exit %d): %s", code, body)
+	}
+	var obj struct {
+		Dir string `json:"dir"`
+	}
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return "", fmt.Errorf("parse mkdir output: %w", err)
+	}
+	return obj.Dir, nil
+}

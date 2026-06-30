@@ -93,6 +93,8 @@ func decodeKeyBrowse(b []byte) Key {
 		return KeyParent
 	case 'c':
 		return KeyChoose
+	case 'm':
+		return KeyMkdir
 	case 0x1b, 0x03: // ESC or Ctrl-C
 		return KeyEsc
 	}

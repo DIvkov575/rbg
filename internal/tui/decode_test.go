@@ -55,6 +55,7 @@ func TestDecodeKeyBrowse(t *testing.T) {
 		{[]byte("\r"), KeyEnter},
 		{[]byte("h"), KeyParent},
 		{[]byte("c"), KeyChoose},
+		{[]byte("m"), KeyMkdir},
 		{[]byte("\x1b"), KeyEsc},
 		{[]byte("\x03"), KeyEsc},
 		{[]byte("z"), KeyNone},

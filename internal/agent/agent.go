@@ -415,6 +415,37 @@ func (a *Agent) Lsdir(out io.Writer, dir string) int {
 	return 0
 }
 
+// Mkdir creates dir (and any missing parents) on the desktop, resolving an
+// empty/relative dir against home like Lsdir does. On success it emits
+// {"dir":"<abs path>"} and returns 0; an empty dir or a creation failure emits
+// {"error":"..."} and returns 1.
+func (a *Agent) Mkdir(out io.Writer, dir string) int {
+	if dir == "" {
+		json.NewEncoder(out).Encode(map[string]string{"error": "mkdir requires a non-empty dir"})
+		return 1
+	}
+	base, err := a.resolveLsdirBase(dir)
+	if err != nil {
+		json.NewEncoder(out).Encode(map[string]string{"error": err.Error()})
+		return 1
+	}
+	abs, err := filepath.Abs(base)
+	if err != nil {
+		json.NewEncoder(out).Encode(map[string]string{"error": err.Error()})
+		return 1
+	}
+	if abs == "" {
+		json.NewEncoder(out).Encode(map[string]string{"error": "resolved to an empty path"})
+		return 1
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		json.NewEncoder(out).Encode(map[string]string{"error": err.Error()})
+		return 1
+	}
+	json.NewEncoder(out).Encode(map[string]string{"dir": abs})
+	return 0
+}
+
 // parseStartedAt parses an RFC3339 timestamp, returning the zero time for
 // empty or unparseable input so such sessions sort as oldest.
 func parseStartedAt(s string) time.Time {

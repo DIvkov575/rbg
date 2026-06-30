@@ -62,6 +62,11 @@ func parseArgs(args []string) (*invocation, error) {
 	case "lsdir":
 		// --dir is optional; empty means the agent picks its default.
 		inv.Dir = flagValue(rest, "--dir")
+	case "mkdir":
+		inv.Dir = flagValue(rest, "--dir")
+		if inv.Dir == "" {
+			return nil, errors.New("mkdir requires --dir")
+		}
 	case "kill":
 		inv.Name = flagValue(rest, "--id")
 		if inv.Name == "" {
@@ -117,6 +122,8 @@ func main() {
 		os.Exit(a.Ls(os.Stdout))
 	case "lsdir":
 		os.Exit(a.Lsdir(os.Stdout, inv.Dir))
+	case "mkdir":
+		os.Exit(a.Mkdir(os.Stdout, inv.Dir))
 	case "kill":
 		os.Exit(a.Kill(os.Stdout, inv.Name))
 	}

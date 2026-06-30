@@ -15,6 +15,7 @@ type Deps struct {
 	Launch     func(dir, task string) error                        // spawn a new agent in dir
 	Kill       func(name string) error                             // forget/terminate an agent
 	Dirs       func(dir string) (string, string, []DirItem, error) // list subdirs: returns dir, parent, entries
+	MakeDir    func(dir string) (string, error)                    // create a dir, returns its abs path
 	Now        func() string                                       // RFC3339 timestamp (defaults to time.Now)
 }
 
@@ -59,7 +60,19 @@ func Run(d Deps, io Stdio) error {
 			return nil // EOF → quit
 		}
 		var act Action
-		if m.Browsing {
+		if m.Browsing && m.MakingDir {
+			// Name-entry sub-mode: reuse the text-input decoder so letters like
+			// 'j'/'k'/'c' are typed literally rather than triggering browse nav.
+			k, r, isRune := decodeKeyInput(raw)
+			switch {
+			case isRune:
+				m = m.InputRune(r)
+			case k == KeyBackspace:
+				m = m.Backspace()
+			default:
+				m, act = Update(m, k)
+			}
+		} else if m.Browsing {
 			m, act = Update(m, decodeKeyBrowse(raw))
 		} else if m.Input {
 			k, r, isRune := decodeKeyInput(raw)
@@ -90,6 +103,20 @@ func Run(d Deps, io Stdio) error {
 				if dir, parent, items, err := d.Dirs(m.BrowseDir); err == nil {
 					m = m.SetBrowse(dir, parent, items)
 				}
+			}
+		case ActionMkdir:
+			if d.MakeDir != nil {
+				newpath, err := d.MakeDir(m.BrowseDir + "/" + m.DirName())
+				if err == nil {
+					m = m.EnteredDir(newpath)
+					if d.Dirs != nil {
+						if dir, parent, items, derr := d.Dirs(m.BrowseDir); derr == nil {
+							m = m.SetBrowse(dir, parent, items)
+						}
+					}
+				}
+				// on error: stay in making-dir mode (buffer preserved) so the
+				// user can correct the name or Esc out.
 			}
 		case ActionLaunch:
 			if d.Launch != nil {
