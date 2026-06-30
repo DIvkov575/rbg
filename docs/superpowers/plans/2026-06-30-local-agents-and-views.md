@@ -95,19 +95,25 @@ func TestViewCycle(t *testing.T) {
 	m, _ = Update(m, KeyView); m, _ = Update(m, KeyView); m, _ = Update(m, KeyView)
 	if m.View != ViewRemote { t.Fatal("cycle should wrap to Remote") }
 }
+func TestCtrlSDecodesToViewCycle(t *testing.T) {
+	if decodeKey([]byte{0x13}) != KeyView {
+		t.Fatal("ctrl+s (0x13) should decode to KeyView")
+	}
+}
 func TestSetLocalAgents(t *testing.T) {
 	m := sample().SetLocalAgents([]LocalAgentItem{{Name:"a",Repo:"r",LastRun:"2026-06-30T00:00:00Z"}})
 	if len(m.LocalAgents) != 1 { t.Fatal("local agents not set") }
 }
 ```
-(Reuse the `KeyView` constant if free; the old `KeyView` was removed earlier — re-add it as the view-cycle key, decoded from `Tab`/`\t` and `1..4`. Confirm no clash via grep.)
+(Re-add a `KeyView` constant decoded from **ctrl+s = byte 0x13** in normal-mode `decodeKey`. ctrl+s reaches the app because `rawMode` already clears `IXON` — verify that line in term_darwin.go/term_linux.go. Confirm 0x13 otherwise unused.)
 - [ ] **Step 2:** Run → FAIL (`ViewRemote`/`m.View`/`SetLocalAgents` undefined).
 - [ ] **Step 3: Implement** in `model.go`:
   - `type ViewMode int; const (ViewRemote ViewMode = iota; ViewLocal; ViewCombined; ViewProject)`
   - `Model` fields: `View ViewMode`, `LocalAgents []LocalAgentItem`.
   - `type LocalAgentItem struct{ Name, Repo, Task, LastRun string }`
   - `SetLocalAgents([]LocalAgentItem) Model`.
-  - In `Update` normal branch: `KeyView` cycles `m.View = (m.View+1)%4`. (Number keys optional.)
+  - In `Update` normal branch: `KeyView` cycles `m.View = (m.View+1)%4`.
+  - In `term.go` `decodeKey`, map byte `0x13` (ctrl+s) → `KeyView`. (1-4 direct-jump optional.)
   - This task is state only; rendering is Task 4.
 - [ ] **Step 4:** `go test ./internal/tui/` → ok.
 - [ ] **Step 5:** Commit: `feat(tui): view-mode enum (remote/local/combined/project)`.

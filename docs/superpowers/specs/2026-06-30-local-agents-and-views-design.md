@@ -41,7 +41,12 @@ The **sync-before-run** is the crux of the user's workflow: a remote agent finis
 ### The problem
 One flat agents list conflates: remote sessions (desktop, tracked), and now persistent local agents (laptop). They have different state (remote: live transcript; local: last-run history) and different actions. Cramming both into one list is confusing.
 
-### Proposed views (cycle with `Tab`, or `1`/`2`/`3`/`4`)
+### Proposed views (cycle with **ctrl+s**)
+
+Views cycle remote → local → combined → project → remote with **ctrl+s** (byte
+`0x13`). Decodable in our TUI because `rawMode` clears `IXON`, so ctrl+s is
+delivered as a keystroke rather than swallowed as XOFF flow control.
+
 1. **Remote view** — desktop sessions only (today's agents list). Hover→transcript, attach, kill, launch.
 2. **Local view** — persistent local agents only. Shows name · repo · last-run. Run (manual), edit task, delete, create-blank.
 3. **Combined view** — both, visually grouped (REMOTE / LOCAL section headers). A single place to see everything in flight + everything stand-by.
@@ -87,7 +92,7 @@ views are for *watching/managing* what's already running.
 - **No new third-party deps** (stdlib only, per project invariant).
 
 ## Open questions for review
-1. View switching: `Tab`-cycle vs. number keys vs. both?
+1. View switching: **ctrl+s cycles** (decided). Optional: also bind 1-4 for direct jumps?
 2. Project view grouping key: by repo URL, or by resolved local dir? (URL groups remote+local that share an origin even if local path differs.)
 3. Local run output capture: always log to `~/.rbg/local-logs/`, or only on request? (Logging enables `read` for local agents but adds files.)
 4. Should a queue item be promotable to a persistent local agent (so the queue stays "one-shot" and local agents are "keep around")?
