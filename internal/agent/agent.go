@@ -39,6 +39,7 @@ type Agent struct {
 	KillProc   func(pid int) error // terminate a process group (defaults to defaultKill)
 	LockDir    string              // dir for per-session lockfiles (defaults beside state)
 	LaunchDir  string              // cwd to run claude in ("" = agent default)
+	ReposRoot  string              // root for repo clones ("" = <ClaudeHome>/rbg-repos)
 }
 
 const claudeBin = "claude"
@@ -443,6 +444,51 @@ func (a *Agent) Mkdir(out io.Writer, dir string) int {
 		return 1
 	}
 	json.NewEncoder(out).Encode(map[string]string{"dir": abs})
+	return 0
+}
+
+// RepoName derives a local directory name from a git URL or slug: the last path
+// segment with any ".git" suffix removed.
+func RepoName(repo string) string {
+	s := repo
+	// handle scp-like git@host:owner/name
+	if i := strings.LastIndexAny(s, "/:"); i >= 0 {
+		s = s[i+1:]
+	}
+	s = strings.TrimSuffix(s, ".git")
+	return s
+}
+
+func (a *Agent) reposRoot() string {
+	if a.ReposRoot != "" {
+		return a.ReposRoot
+	}
+	return filepath.Join(a.ClaudeHome, "rbg-repos")
+}
+
+// Clone ensures a local clone of repo exists under the repos root and prints
+// {"dir":"<abs clone path>"}. If the clone dir already has a .git, it is reused
+// (no network). Private repos rely on the desktop's existing git credentials.
+func (a *Agent) Clone(out io.Writer, repo string) int {
+	if strings.TrimSpace(repo) == "" {
+		json.NewEncoder(out).Encode(map[string]string{"error": "empty repo"})
+		return 1
+	}
+	dest := filepath.Join(a.reposRoot(), RepoName(repo))
+	if fi, err := os.Stat(filepath.Join(dest, ".git")); err == nil && fi.IsDir() {
+		json.NewEncoder(out).Encode(map[string]string{"dir": dest})
+		return 0
+	}
+	if err := os.MkdirAll(a.reposRoot(), 0o755); err != nil {
+		json.NewEncoder(out).Encode(map[string]string{"error": err.Error()})
+		return 1
+	}
+	_, code, err := a.Runner.Run("git", []string{"clone", repo, dest}, nil)
+	if err != nil || code != 0 {
+		json.NewEncoder(out).Encode(map[string]string{"error": "git clone failed"})
+		return 1
+	}
+	json.NewEncoder(out).Encode(map[string]string{"dir": dest})
 	return 0
 }
 

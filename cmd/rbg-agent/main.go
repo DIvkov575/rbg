@@ -20,6 +20,7 @@ type invocation struct {
 	Name string // --name (launch) or --id (send/read)
 	Task string
 	Dir  string // --dir (lsdir; optional)
+	Repo string // --repo (clone)
 }
 
 func parseArgs(args []string) (*invocation, error) {
@@ -71,6 +72,11 @@ func parseArgs(args []string) (*invocation, error) {
 		inv.Name = flagValue(rest, "--id")
 		if inv.Name == "" {
 			return nil, errors.New("kill requires --id")
+		}
+	case "clone":
+		inv.Repo = flagValue(rest, "--repo")
+		if inv.Repo == "" {
+			return nil, errors.New("clone requires --repo")
 		}
 	default:
 		return nil, fmt.Errorf("unknown verb %q", inv.Verb)
@@ -126,5 +132,7 @@ func main() {
 		os.Exit(a.Mkdir(os.Stdout, inv.Dir))
 	case "kill":
 		os.Exit(a.Kill(os.Stdout, inv.Name))
+	case "clone":
+		os.Exit(a.Clone(os.Stdout, inv.Repo))
 	}
 }

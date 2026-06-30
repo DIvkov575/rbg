@@ -81,3 +81,23 @@ func MakeDir(c *config.Config, r run.Runner, dir string) (string, error) {
 	}
 	return obj.Dir, nil
 }
+
+// CloneRepo asks the desktop agent to clone-or-reuse repo and returns the local
+// clone directory. Mirrors FetchDirs.
+func CloneRepo(c *config.Config, r run.Runner, repo string) (string, error) {
+	body, code := runAgent(c, r, "clone", []string{"--repo", repo})
+	if code != 0 {
+		return "", fmt.Errorf("clone failed (exit %d): %s", code, body)
+	}
+	var resp struct {
+		Dir   string `json:"dir"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", fmt.Errorf("parse clone output: %w", err)
+	}
+	if resp.Error != "" {
+		return "", fmt.Errorf("clone: %s", resp.Error)
+	}
+	return resp.Dir, nil
+}

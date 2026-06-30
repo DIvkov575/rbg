@@ -120,3 +120,27 @@ func TestMakeDir_UnreachableErrors(t *testing.T) {
 		t.Fatal("expected error when ssh unreachable")
 	}
 }
+
+func TestCloneRepo_ParsesDir(t *testing.T) {
+	r := &run.Recording{
+		BySubstring: map[string]run.Result{"clone": {Stdout: []byte(`{"dir":"/home/u/rbg-repos/my-svc"}`)}},
+		Default:     run.Result{Code: 0},
+	}
+	dir, err := CloneRepo(cfg(), r, "https://github.com/me/my-svc.git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != "/home/u/rbg-repos/my-svc" {
+		t.Fatalf("dir = %q", dir)
+	}
+}
+
+func TestCloneRepo_ErrorJSON(t *testing.T) {
+	r := &run.Recording{
+		BySubstring: map[string]run.Result{"clone": {Stdout: []byte(`{"error":"git clone failed"}`), Code: 1}},
+		Default:     run.Result{Code: 0},
+	}
+	if _, err := CloneRepo(cfg(), r, "bad"); err == nil {
+		t.Fatal("expected error")
+	}
+}
