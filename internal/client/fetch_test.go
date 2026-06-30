@@ -1,6 +1,8 @@
 package client
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/divkov575/rbg/internal/run"
@@ -46,5 +48,20 @@ func TestFetchTranscript_ReturnsRenderedText(t *testing.T) {
 	}
 	if text != "user: q\nassistant: a\n" {
 		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestKill_InvokesAgentKill(t *testing.T) {
+	r := &run.Recording{
+		BySubstring: map[string]run.Result{"kill": {Stdout: []byte(`{"ok":"killed","id":"alpha"}`)}},
+		Default:     run.Result{Code: 0},
+	}
+	var out bytes.Buffer
+	if code := Kill(cfg(), r, &out, "alpha"); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	joined := strings.Join(r.Calls[len(r.Calls)-1].Args, " ")
+	if !strings.Contains(joined, "kill") || !strings.Contains(joined, "alpha") {
+		t.Fatalf("kill call = %q", joined)
 	}
 }

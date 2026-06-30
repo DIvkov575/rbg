@@ -68,6 +68,14 @@ func Ls(c *config.Config, r run.Runner, out io.Writer) int {
 	return 0
 }
 
+// Kill forgets an agent on the desktop (terminating any live child, keeping the
+// transcript). Prints the agent's reply.
+func Kill(c *config.Config, r run.Runner, out io.Writer, name string) int {
+	body, code := runAgent(c, r, "kill", []string{"--id", name})
+	out.Write(body)
+	return code
+}
+
 // Ping reports reachability using the gate only.
 func Ping(c *config.Config, r run.Runner, out io.Writer) int {
 	if sshx.Reachable(c, r) {

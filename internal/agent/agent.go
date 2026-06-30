@@ -29,12 +29,13 @@ type SpawnFunc func(name string, args []string, stdoutPath string) (pid int, err
 // Agent holds the agent's injectable dependencies.
 type Agent struct {
 	Runner     run.Runner
-	StatePath  string        // ~/.rbg-agent/sessions.json
-	ClaudeHome string        // root for transcript paths (~ in prod)
-	Now        func() string // timestamp source (injectable for tests)
-	NewID      func() string // session-id generator (injectable for tests)
-	Spawn      SpawnFunc     // detached child spawner (defaults via DefaultSpawn)
-	LockDir    string        // dir for per-session lockfiles (defaults beside state)
+	StatePath  string              // ~/.rbg-agent/sessions.json
+	ClaudeHome string              // root for transcript paths (~ in prod)
+	Now        func() string       // timestamp source (injectable for tests)
+	NewID      func() string       // session-id generator (injectable for tests)
+	Spawn      SpawnFunc           // detached child spawner (defaults via DefaultSpawn)
+	KillProc   func(pid int) error // terminate a process group (defaults to defaultKill)
+	LockDir    string              // dir for per-session lockfiles (defaults beside state)
 }
 
 const claudeBin = "claude"
@@ -131,7 +132,8 @@ func (a *Agent) Launch(out io.Writer, name, task string) int {
 		spawn = DefaultSpawn
 	}
 	args := append([]string{claudeBin}, claudecli.LaunchHeadlessArgs(sid, task)...)
-	if _, err := spawn(args[0], args[1:], a.sendLogPath(resolved)); err != nil {
+	pid, err := spawn(args[0], args[1:], a.sendLogPath(resolved))
+	if err != nil {
 		fmt.Fprintf(out, "rbg-agent: launch spawn failed: %v\n", err)
 		return 1
 	}
@@ -139,6 +141,7 @@ func (a *Agent) Launch(out io.Writer, name, task string) int {
 		Name:            resolved,
 		ClaudeSessionID: sid,
 		TranscriptPath:  a.transcriptPath(sid),
+		PID:             pid,
 		StartedAt:       a.Now(),
 	})
 	if err := store.Save(); err != nil {
@@ -213,11 +216,14 @@ func (a *Agent) Send(out io.Writer, name, task string) int {
 		spawn = DefaultSpawn
 	}
 	args := append([]string{claudeBin}, claudecli.ResumeHeadlessArgs(sess.ClaudeSessionID, task)...)
-	_, err = spawn(args[0], args[1:], a.sendLogPath(name))
+	pid, err := spawn(args[0], args[1:], a.sendLogPath(name))
 	if err != nil {
 		fmt.Fprintf(out, "rbg-agent: spawn failed: %v\n", err)
 		return 1
 	}
+	sess.PID = pid
+	store.Add(sess) // persist the new child's pid for a later kill
+	_ = store.Save()
 	json.NewEncoder(out).Encode(map[string]string{"ok": "sent", "id": name})
 	return 0
 }
@@ -250,6 +256,43 @@ func (a *Agent) Read(out io.Writer, name string) int {
 	}
 	render.Stream(lines, out)
 	return 0
+}
+
+// Kill forgets an agent: it terminates the recorded child's process group if
+// one is still alive, removes the session from the store, and KEEPS the
+// transcript .jsonl on disk. Unknown agent → exit 1.
+func (a *Agent) Kill(out io.Writer, name string) int {
+	store, err := session.Load(a.StatePath)
+	if err != nil {
+		fmt.Fprintf(out, "rbg-agent: %v\n", err)
+		return 1
+	}
+	sess, ok := store.Get(name)
+	if !ok {
+		fmt.Fprintf(out, "rbg-agent: unknown agent %q\n", name)
+		return 1
+	}
+	if sess.PID > 0 {
+		kill := a.KillProc
+		if kill == nil {
+			kill = defaultKill
+		}
+		// Best-effort: the child is detached and often already exited.
+		_ = kill(sess.PID)
+	}
+	store.Delete(name)
+	if err := store.Save(); err != nil {
+		fmt.Fprintf(out, "rbg-agent: %v\n", err)
+		return 1
+	}
+	json.NewEncoder(out).Encode(map[string]string{"ok": "killed", "id": name})
+	return 0
+}
+
+// defaultKill sends SIGTERM to the process GROUP of pid (negative pid), matching
+// the Setsid'd child spawned by DefaultSpawn, so the whole detached job dies.
+func defaultKill(pid int) error {
+	return syscall.Kill(-pid, syscall.SIGTERM)
 }
 
 // DefaultSpawn starts a detached child in its own process group with stdout

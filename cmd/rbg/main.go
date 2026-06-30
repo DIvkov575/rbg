@@ -57,9 +57,9 @@ func parse(args []string) (*inv, error) {
 				in.follow = true
 			}
 		}
-	case "attach":
+	case "attach", "kill":
 		if len(rest) < 1 {
-			return nil, fmt.Errorf("attach requires <name>")
+			return nil, fmt.Errorf("%s requires <name>", in.verb)
 		}
 		in.name = rest[0]
 	default:
@@ -100,6 +100,8 @@ func main() {
 		os.Exit(client.Ls(cfg, r, os.Stdout))
 	case "attach":
 		os.Exit(attach(cfg, r, in.name))
+	case "kill":
+		os.Exit(client.Kill(cfg, r, os.Stdout, in.name))
 	case "deploy":
 		os.Exit(deploy(cfg, r))
 	case "dash":
@@ -146,6 +148,7 @@ Commands:
   read <name> [-f]          print an agent's transcript (-f/--follow reserved)
   ls                        list agents recorded on the desktop
   attach <name>             attach to an agent interactively (TTY)
+  kill <name>               forget an agent (terminate live child; keep transcript)
   ping                      check the desktop is reachable
   deploy                    build and install the agent binary on the desktop
   dash                      interactive dashboard (also the default with no args)

@@ -140,3 +140,65 @@ func TestSend_SpawnUsesAgentOwnedLogPath(t *testing.T) {
 		t.Fatalf("spawn must not target the claude transcript path, got %q", gotPath)
 	}
 }
+
+func TestKill_TerminatesLiveProcAndForgetsKeepingTranscript(t *testing.T) {
+	a := newAgent(t, &run.Recording{})
+	sid := "11111111-2222-3333-4444-555555555555"
+	// seed a session WITH a transcript and a recorded pid
+	realDir := filepath.Join(a.ClaudeHome, ".claude", "projects", "-proj")
+	os.MkdirAll(realDir, 0o755)
+	tp := filepath.Join(realDir, sid+".jsonl")
+	os.WriteFile(tp, []byte(`{"message":{"role":"user","content":"hi"}}`+"\n"), 0o600)
+	store, _ := session.Load(a.StatePath)
+	store.Add(session.Session{Name: "alpha", ClaudeSessionID: sid, TranscriptPath: tp, PID: 4242})
+	store.Save()
+
+	var killed int
+	a.KillProc = func(pid int) error { killed = pid; return nil }
+
+	var out bytes.Buffer
+	if code := a.Kill(&out, "alpha"); code != 0 {
+		t.Fatalf("Kill code=%d out=%s", code, out.String())
+	}
+	if killed != 4242 {
+		t.Errorf("expected to signal pid 4242, got %d", killed)
+	}
+	// forgotten from store
+	s2, _ := session.Load(a.StatePath)
+	if _, ok := s2.Get("alpha"); ok {
+		t.Error("alpha should be forgotten")
+	}
+	// transcript KEPT
+	if _, err := os.Stat(tp); err != nil {
+		t.Errorf("transcript should be kept: %v", err)
+	}
+}
+
+func TestKill_UnknownAgent(t *testing.T) {
+	a := newAgent(t, &run.Recording{})
+	a.KillProc = func(pid int) error { return nil }
+	var out bytes.Buffer
+	if code := a.Kill(&out, "ghost"); code != 1 {
+		t.Fatalf("want 1 for unknown, got %d", code)
+	}
+}
+
+func TestKill_NoPidStillForgets(t *testing.T) {
+	a := newAgent(t, &run.Recording{})
+	store, _ := session.Load(a.StatePath)
+	store.Add(session.Session{Name: "alpha", ClaudeSessionID: "sid-1"}) // PID 0
+	store.Save()
+	calls := 0
+	a.KillProc = func(pid int) error { calls++; return nil }
+	var out bytes.Buffer
+	if code := a.Kill(&out, "alpha"); code != 0 {
+		t.Fatalf("Kill code=%d", code)
+	}
+	if calls != 0 {
+		t.Error("must not signal when no live pid recorded")
+	}
+	s2, _ := session.Load(a.StatePath)
+	if _, ok := s2.Get("alpha"); ok {
+		t.Error("alpha should be forgotten")
+	}
+}

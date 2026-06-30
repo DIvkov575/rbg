@@ -50,6 +50,9 @@ func (s *Store) Get(id string) (Session, bool) {
 	return sess, ok
 }
 
+// Delete removes a session by id. Missing id is a no-op.
+func (s *Store) Delete(id string) { delete(s.Sessions, id) }
+
 // Save writes the store atomically (temp + rename), creating parents.
 func (s *Store) Save() error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {

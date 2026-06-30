@@ -108,3 +108,13 @@ func TestUsageMentionsEveryVerb(t *testing.T) {
 		}
 	}
 }
+
+func TestParse_Kill(t *testing.T) {
+	in, err := parse([]string{"kill", "alpha"})
+	if err != nil || in.verb != "kill" || in.name != "alpha" {
+		t.Fatalf("kill: inv=%+v err=%v", in, err)
+	}
+	if _, err := parse([]string{"kill"}); err == nil {
+		t.Fatal("kill without name should error")
+	}
+}

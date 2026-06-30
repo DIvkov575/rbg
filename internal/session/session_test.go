@@ -47,3 +47,22 @@ func TestLoadCorruptReturnsEmpty(t *testing.T) {
 		t.Fatal("corrupt should load empty")
 	}
 }
+
+func TestDeleteRemovesEntry(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sessions.json")
+	s, _ := Load(p)
+	s.Add(Session{Name: "alpha", ClaudeSessionID: "sid-1"})
+	s.Add(Session{Name: "beta", ClaudeSessionID: "sid-2"})
+	s.Delete("alpha")
+	if _, ok := s.Get("alpha"); ok {
+		t.Fatal("alpha should be deleted")
+	}
+	if _, ok := s.Get("beta"); !ok {
+		t.Fatal("beta should remain")
+	}
+}
+
+func TestDeleteMissingIsNoop(t *testing.T) {
+	s, _ := Load(filepath.Join(t.TempDir(), "s.json"))
+	s.Delete("ghost") // must not panic
+}

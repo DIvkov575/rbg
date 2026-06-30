@@ -58,6 +58,11 @@ func parseArgs(args []string) (*invocation, error) {
 		if inv.Name == "" {
 			return nil, errors.New("read requires --id")
 		}
+	case "kill":
+		inv.Name = flagValue(rest, "--id")
+		if inv.Name == "" {
+			return nil, errors.New("kill requires --id")
+		}
 	default:
 		return nil, fmt.Errorf("unknown verb %q", inv.Verb)
 	}
@@ -105,5 +110,7 @@ func main() {
 		os.Exit(a.Read(os.Stdout, inv.Name))
 	case "ls":
 		os.Exit(a.Ls(os.Stdout))
+	case "kill":
+		os.Exit(a.Kill(os.Stdout, inv.Name))
 	}
 }
