@@ -84,12 +84,20 @@ def test_launch_then_ls(env, tmp_path):
 
 @needs_env
 def test_read_replays_seeded_transcript(env, tmp_path):
+    import time
     sim, rbg = env
     ch = tmp_path / "ch"
     run_rbg(sim, rbg, ch, "launch", "alpha", "say hello")
-    read = run_rbg(sim, rbg, ch, "read", "alpha")
-    assert read.returncode == 0, read.stderr
-    assert "user: say hello" in read.stdout
+    # launch spawns the claude child detached and returns immediately, so the
+    # transcript may not be written yet; poll read until it appears.
+    seen = ""
+    for _ in range(20):
+        read = run_rbg(sim, rbg, ch, "read", "alpha")
+        seen = read.stdout
+        if "user: say hello" in seen:
+            break
+        time.sleep(0.25)
+    assert "user: say hello" in seen
 
 
 @needs_env
