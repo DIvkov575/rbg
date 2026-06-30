@@ -7,7 +7,7 @@ import (
 
 func TestLaunchHeadlessArgs(t *testing.T) {
 	got := LaunchHeadlessArgs("sid-x", "do it")
-	want := []string{"-p", "do it", "--session-id", "sid-x"}
+	want := []string{"-p", "do it", "--session-id", "sid-x", "--dangerously-skip-permissions"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v want %v", got, want)
 	}
@@ -15,7 +15,7 @@ func TestLaunchHeadlessArgs(t *testing.T) {
 
 func TestResumeHeadlessArgs(t *testing.T) {
 	got := ResumeHeadlessArgs("sid-1", "next step")
-	want := []string{"-p", "next step", "--resume", "sid-1"}
+	want := []string{"-p", "next step", "--resume", "sid-1", "--dangerously-skip-permissions"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v want %v", got, want)
 	}
