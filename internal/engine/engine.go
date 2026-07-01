@@ -50,11 +50,16 @@ func New(cfg *config.Config, r run.Runner, storePath, home string) (*Engine, err
 		return nil, err
 	}
 	// Checkout roots for repo→dir derivation: the laptop uses ~/workplace; the
-	// desktop uses its configured working dir (RBG_CWD) as home, with the same
-	// workplace convention beneath it.
+	// desktop uses its configured working dir (RBG_CWD, validated absolute by
+	// config.Load) as home, with the same workplace convention beneath it. When
+	// RBG_CWD is unset the remote base stays empty, so RepoDir returns "" and Run
+	// rejects a repo-backed remote agent with a message that names RBG_CWD.
 	localBase := filepath.Join(home, "workplace")
 	remoteHome := cfg.CWD
-	remoteBase := filepath.Join(remoteHome, "workplace")
+	var remoteBase string
+	if remoteHome != "" {
+		remoteBase = filepath.Join(remoteHome, "workplace")
+	}
 	return &Engine{
 		store: store,
 		local: machine{

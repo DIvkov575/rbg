@@ -2,6 +2,7 @@ package engine
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -150,26 +151,54 @@ func TestRunLocalRecordsPid(t *testing.T) {
 	}
 }
 
-func TestRunRefusesToReRunRunningAgent(t *testing.T) {
-	// Re-running would overwrite the live Session/Pid and orphan the child.
+func TestRunReRunStopsPriorChildThenRelaunches(t *testing.T) {
+	// Re-running an agent already marked Running must first stop the prior local
+	// child (so it isn't orphaned), then relaunch and record the new identity.
 	var launched string
+	var killedPid int
 	loc := machine{
 		Source:    fakeSource{},
 		Repo:      fakeRepo{},
-		newRunner: runnerFactory(fakeRunner{launched: &launched}),
+		newRunner: runnerFactory(fakeRunner{res: host.RunResult{Name: "busy", Session: "NEW", Pid: 1000}, launched: &launched}),
 	}
 	e := newTestEngine(t, loc, machine{Source: fakeSource{}})
+	e.killLocal = func(pid int) error { killedPid = pid; return nil }
 	e.store.Add(core.Agent{Name: "busy", Session: "OLD", Pid: 999, Task: "t", Where: core.Local, State: core.Running, Origin: core.Managed})
 
-	if err := e.Run("busy"); err == nil {
-		t.Errorf("Run on an already-running agent should error")
+	if err := e.Run("busy"); err != nil {
+		t.Fatalf("re-run should succeed: %v", err)
 	}
-	if launched != "" {
-		t.Errorf("must NOT launch a second child, but launched %q", launched)
+	if killedPid != 999 {
+		t.Errorf("re-run should stop the prior child pid 999 first, killed %d", killedPid)
+	}
+	if launched != "busy" {
+		t.Errorf("re-run should relaunch, launched %q", launched)
 	}
 	rec, _ := e.store.Get("busy")
-	if rec.Session != "OLD" || rec.Pid != 999 {
-		t.Errorf("live identity was overwritten: %+v", rec)
+	if rec.Session != "NEW" || rec.Pid != 1000 {
+		t.Errorf("re-run should record the new identity, got %+v", rec)
+	}
+}
+
+func TestRunReRunSelfExitedLocalAgentSucceeds(t *testing.T) {
+	// A local agent whose child already exited stays State=Running in the store
+	// (nothing flips it to Done). Re-run must still work: the best-effort stop of
+	// the dead pid is a harmless no-op, and the relaunch proceeds.
+	loc := machine{
+		Source:    fakeSource{},
+		Repo:      fakeRepo{},
+		newRunner: runnerFactory(fakeRunner{res: host.RunResult{Name: "gone", Session: "S2", Pid: 42}}),
+	}
+	e := newTestEngine(t, loc, machine{Source: fakeSource{}})
+	e.killLocal = func(pid int) error { return fmt.Errorf("no such process") } // dead pid
+	e.store.Add(core.Agent{Name: "gone", Session: "S1", Pid: 7, Task: "t", Where: core.Local, State: core.Running, Origin: core.Managed})
+
+	if err := e.Run("gone"); err != nil {
+		t.Fatalf("re-run of a self-exited agent should succeed despite the dead-pid kill: %v", err)
+	}
+	rec, _ := e.store.Get("gone")
+	if rec.Session != "S2" {
+		t.Errorf("expected relaunch to record new session S2, got %q", rec.Session)
 	}
 }
 

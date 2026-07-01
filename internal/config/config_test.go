@@ -46,6 +46,37 @@ func TestMissingHostErrors(t *testing.T) {
 	}
 }
 
+func TestRelativeCWDErrors(t *testing.T) {
+	// A relative RBG_CWD would resolve against the desktop login cwd; reject it
+	// early rather than surface a confusing "no working dir" at run time.
+	conf := writeConf(t, "RBG_HOST=h\nRBG_CWD=workplace\n")
+	if _, err := Load(map[string]string{}, conf); err == nil {
+		t.Error("expected error for a relative RBG_CWD")
+	}
+}
+
+func TestAbsoluteCWDAccepted(t *testing.T) {
+	conf := writeConf(t, "RBG_HOST=h\nRBG_CWD=/home/me\n")
+	cfg, err := Load(map[string]string{}, conf)
+	if err != nil {
+		t.Fatalf("absolute RBG_CWD should load: %v", err)
+	}
+	if cfg.CWD != "/home/me" {
+		t.Errorf("CWD = %q, want /home/me", cfg.CWD)
+	}
+}
+
+func TestUnsetCWDIsAllowed(t *testing.T) {
+	conf := writeConf(t, "RBG_HOST=h\n")
+	cfg, err := Load(map[string]string{}, conf)
+	if err != nil {
+		t.Fatalf("unset RBG_CWD should load (optional): %v", err)
+	}
+	if cfg.CWD != "" {
+		t.Errorf("CWD = %q, want empty", cfg.CWD)
+	}
+}
+
 func TestAgentPathDefault(t *testing.T) {
 	conf := writeConf(t, "RBG_HOST=h\n")
 	cfg, _ := Load(map[string]string{}, conf)

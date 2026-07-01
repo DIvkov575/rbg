@@ -130,9 +130,12 @@ func RepoDir(base, home, repo string) string {
 	if repo == "" {
 		return ""
 	}
-	if strings.HasPrefix(repo, "~/") {
+	if repo == "~" || strings.HasPrefix(repo, "~/") {
 		if !filepath.IsAbs(home) {
 			return "" // can't expand ~ without an absolute home
+		}
+		if repo == "~" {
+			return home
 		}
 		return filepath.Join(home, repo[2:])
 	}

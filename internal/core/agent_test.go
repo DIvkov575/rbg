@@ -166,6 +166,7 @@ func TestRepoDir(t *testing.T) {
 		{"bare name", "my-svc", "/home/me/workplace/my-svc"},
 		{"absolute path used verbatim", "/srv/app", "/srv/app"},
 		{"tilde expands to home", "~/code/thing", "/home/me/code/thing"},
+		{"bare tilde is home", "~", "/home/me"},
 		{"trailing slash still yields the leaf", "https://github.com/me/app/", "/home/me/workplace/app"},
 		{"multiple trailing slashes", "me/app//", "/home/me/workplace/app"},
 	}

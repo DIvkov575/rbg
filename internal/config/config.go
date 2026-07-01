@@ -44,6 +44,14 @@ func Load(env map[string]string, confPath string) (*Config, error) {
 	if host == "" {
 		return nil, errors.New("RBG_HOST not set (export it or put it in ~/.rbg.conf)")
 	}
+	cwd := get("RBG_CWD")
+	if cwd != "" && !filepath.IsAbs(cwd) {
+		// CWD roots the desktop's working dir and the repo→dir derivation; a
+		// relative value would resolve against the login shell's cwd on the
+		// desktop, so reject it early with a clear message rather than let it
+		// surface later as a confusing "no working dir" at run time.
+		return nil, fmt.Errorf("RBG_CWD must be an absolute path, got %q", cwd)
+	}
 	agentPath := get("RBG_AGENT_PATH")
 	if agentPath == "" {
 		agentPath = defaultAgentPath
@@ -63,7 +71,7 @@ func Load(env map[string]string, confPath string) (*Config, error) {
 	}
 	return &Config{
 		Host:           host,
-		CWD:            get("RBG_CWD"),
+		CWD:            cwd,
 		SSHOpts:        strings.Fields(get("RBG_SSH")),
 		AgentPath:      agentPath,
 		Mux:            mux,

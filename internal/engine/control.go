@@ -17,19 +17,31 @@ func (e *Engine) Run(name string) error {
 	if !ok {
 		return fmt.Errorf("run: agent %q is not managed (create or adopt it first)", name)
 	}
-	if rec.State == core.Running {
-		// Re-launching would overwrite the live Session/Pid we already recorded,
-		// orphaning the running child (its pid becomes unreachable to Kill). Stop
-		// it first if a fresh run is really wanted.
-		return fmt.Errorf("run: agent %q is already running (kill it first to re-run)", name)
-	}
 	m := e.pick(rec.Where)
+
+	if rec.State == core.Running {
+		// Re-run is allowed (HLD: "launch or re-run a staged agent"), but launching
+		// would overwrite the recorded Session/Pid and orphan the prior child. So
+		// best-effort stop the previous run first — for a local agent whose child
+		// already self-exited this is a harmless no-op, which is exactly the case a
+		// hard "already running" block would wedge (kill would fail on the dead
+		// pid, leaving no way to re-run).
+		if rec.Where == core.Local && rec.Pid > 0 {
+			_ = e.killLocal(rec.Pid)
+		}
+		// (Remote: rbg-agent's client-generated sessions have no resident process,
+		// so the prior session simply becomes stale; the new launch supersedes it.)
+	}
 
 	if rec.Repo != "" {
 		if rec.Dir == "" {
-			// A repo-backed agent with no working dir would pull/launch in the
-			// wrong place (e.g. `git -C "" pull`). Create derives Dir; a record
-			// missing it is malformed.
+			// A repo-backed agent with no working dir would pull/launch in the wrong
+			// place (e.g. `git -C "" pull`). Create derives Dir; an empty one means
+			// the derivation couldn't produce an absolute path — usually a remote
+			// agent with RBG_CWD unset.
+			if rec.Where == core.Remote {
+				return fmt.Errorf("run: agent %q has a repo but no working dir; set RBG_CWD (absolute) so rbg can locate the remote checkout, then recreate it", name)
+			}
 			return fmt.Errorf("run: agent %q has a repo but no working dir (recreate it)", name)
 		}
 		if err := m.Repo.Pull(rec.Dir); err != nil {
