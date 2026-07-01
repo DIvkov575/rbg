@@ -122,15 +122,3 @@ func (m *Model) Selected() (core.Agent, bool) {
 	}
 	return vis[m.Cursor], true
 }
-
-// inputScreen's behavior is added in Task 5; declared here (with the fields it
-// will carry) so the stack and list.go compile. The stub methods are replaced
-// with real bodies in input.go.
-type inputScreen struct {
-	mode   inputMode
-	target string
-}
-
-func (s *inputScreen) Update(m *Model, k Key, r rune) Action { return Action{} }
-func (s *inputScreen) View(m *Model) string                  { return "" }
-func (s *inputScreen) Hints() string                         { return "" }

@@ -111,15 +111,3 @@ func (m *Model) clampCursor() {
 }
 
 var _ Screen = (*listScreen)(nil)
-
-// (temporary until Task 5 defines the real input screen)
-type inputMode int
-
-const (
-	createMode inputMode = iota
-	sendMode
-)
-
-func newInputScreen(mode inputMode, target string) *inputScreen {
-	return &inputScreen{mode: mode, target: target}
-}
