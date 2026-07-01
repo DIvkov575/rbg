@@ -6,6 +6,8 @@
 package uitea
 
 import (
+	"os/exec"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/divkov575/rbg/internal/core"
@@ -70,9 +72,8 @@ type Model struct {
 
 // New builds a dashboard model over ops.
 func New(ops Ops) Model {
-	// Default to the combined lens: most agents (and every newly-created managed
-	// one) live locally, so defaulting to the remote-only lens hid them and made
-	// the dashboard look empty. Combined shows both machines at once.
+	// Default to the combined lens (everything, both machines). The old
+	// remote-only / local-only individual lenses were removed.
 	return Model{ops: ops, view: viewCombined}
 }
 
@@ -154,6 +155,22 @@ func (m Model) selected() (core.Agent, bool) {
 		return core.Agent{}, false
 	}
 	return vis[m.cursor], true
+}
+
+// openClientCmd suspends the dashboard and hands the terminal to the real
+// interactive `claude --resume <session>` client, run in the agent's working
+// dir. On exit the dashboard resumes and the inventory refreshes. This is why a
+// local conversation opens the genuine client instead of a custom render.
+func (m Model) openClientCmd(a core.Agent) tea.Cmd {
+	c := exec.Command("claude", "--resume", a.Session)
+	if a.Dir != "" {
+		c.Dir = a.Dir
+	}
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		// whatever happened, re-pull the inventory so state reflects the session.
+		agents, lerr := m.ops.List()
+		return agentsMsg{agents: agents, err: lerr}
+	})
 }
 
 // clampCursor keeps the cursor within the visible bounds.

@@ -73,9 +73,9 @@ func syncTag(s core.Sync) string {
 	return lipgloss.NewStyle().Foreground(cDim).Render("—")
 }
 
-// tabsBar renders the four lens tabs with the active one highlighted.
+// tabsBar renders the lens tabs with the active one highlighted.
 func (m Model) tabsBar() string {
-	names := []viewMode{viewRemote, viewLocal, viewCombined, viewProject}
+	names := []viewMode{viewCombined, viewProject}
 	var parts []string
 	for _, v := range names {
 		if v == m.view {
@@ -108,12 +108,10 @@ func (m Model) viewList() string {
 	b.WriteByte('\n')
 
 	switch m.view {
-	case viewCombined:
-		b.WriteString(m.sectionedRows(nameW))
 	case viewProject:
 		b.WriteString(m.projectRows(nameW))
-	default:
-		b.WriteString(m.rows(m.visible(), 0, nameW))
+	default: // combined
+		b.WriteString(m.sectionedRows(nameW))
 	}
 
 	if m.status != "" {
@@ -168,18 +166,18 @@ func (m Model) sectionedRows(nameW int) string {
 }
 
 func (m Model) projectRows(nameW int) string {
-	groups := core.GroupByRepo(m.agents)
+	groups := core.GroupByProject(m.agents)
 	if len(groups) == 0 {
 		return stHints.Render("  (none)") + "\n"
 	}
 	var b strings.Builder
 	base := 0
 	for _, g := range groups {
-		repo := g.Repo
-		if repo == "" {
-			repo = "(no repo)"
+		project := g.Project
+		if project == "" {
+			project = "(unlinked)"
 		}
-		b.WriteString(stSection.Render(repo) + "\n")
+		b.WriteString(stSection.Render(project) + "\n")
 		b.WriteString(m.rows(g.Agents, base, nameW))
 		base += len(g.Agents)
 	}

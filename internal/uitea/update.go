@@ -2,6 +2,8 @@ package uitea
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/divkov575/rbg/internal/core"
 )
 
 // Update is the Bubble Tea reducer. It folds window-size events, async engine
@@ -44,6 +46,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleKey routes a keystroke by the current mode.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	s, r := keyName(msg)
+	// ctrl+z closes any screen: from a sub-screen (input/pager/picker) it backs
+	// out to the list; from the list it quits the dashboard.
+	if s == "close" {
+		if m.mode != modeList {
+			m.mode = modeList
+			return m, nil
+		}
+		return m, tea.Quit
+	}
 	switch m.mode {
 	case modeInput:
 		return m.keyInput(s, r)
@@ -80,6 +91,12 @@ func (m Model) keyList(s string, r rune) (tea.Model, tea.Cmd) {
 		return m, nil
 	case s == "enter":
 		if a, ok := m.selected(); ok {
+			// A LOCAL conversation opens the real interactive claude client (no
+			// custom render). A remote one falls back to the read-only pager, since
+			// we can't hand a remote TTY to the inline program cleanly.
+			if a.Where == core.Local && a.Session != "" {
+				return m, m.openClientCmd(a)
+			}
 			return m, m.readCmd(a.Name)
 		}
 		return m, nil
@@ -165,6 +182,8 @@ func keyName(k tea.KeyMsg) (string, rune) {
 	switch k.Type {
 	case tea.KeyCtrlC:
 		return "quit", 0
+	case tea.KeyCtrlZ:
+		return "close", 0
 	case tea.KeyCtrlS:
 		return "cycle", 0
 	case tea.KeyTab:

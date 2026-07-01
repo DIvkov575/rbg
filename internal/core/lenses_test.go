@@ -32,31 +32,70 @@ func TestOnMachine(t *testing.T) {
 	}
 }
 
-func TestGroupByRepoSortedWithNoRepoLast(t *testing.T) {
-	groups := GroupByRepo(sampleInventory())
-	// Expect groups: "app" (2), "lib" (1), then "" bucket (1) last.
+func TestGroupByProjectSortedWithUnlinkedLast(t *testing.T) {
+	groups := GroupByProject(sampleInventory())
+	// Keys fall back to repo leaf here (no Dir): "app" (2), "lib" (1), "" last.
 	if len(groups) != 3 {
 		t.Fatalf("got %d groups, want 3", len(groups))
 	}
-	if groups[0].Repo != "app" || len(groups[0].Agents) != 2 {
-		t.Errorf("group[0] = %q with %d agents, want app/2", groups[0].Repo, len(groups[0].Agents))
+	if groups[0].Project != "app" || len(groups[0].Agents) != 2 {
+		t.Errorf("group[0] = %q with %d agents, want app/2", groups[0].Project, len(groups[0].Agents))
 	}
-	if groups[1].Repo != "lib" || len(groups[1].Agents) != 1 {
-		t.Errorf("group[1] = %q with %d agents, want lib/1", groups[1].Repo, len(groups[1].Agents))
+	if groups[1].Project != "lib" || len(groups[1].Agents) != 1 {
+		t.Errorf("group[1] = %q with %d agents, want lib/1", groups[1].Project, len(groups[1].Agents))
 	}
-	if groups[2].Repo != "" || len(groups[2].Agents) != 1 {
-		t.Errorf("group[2] = %q with %d agents, want \"\"/1", groups[2].Repo, len(groups[2].Agents))
+	if groups[2].Project != "" || len(groups[2].Agents) != 1 {
+		t.Errorf("group[2] = %q with %d agents, want \"\"/1", groups[2].Project, len(groups[2].Agents))
 	}
 }
 
-func TestGroupByRepoAgentsSortedByName(t *testing.T) {
+func TestGroupByProjectLinksSameDir(t *testing.T) {
+	// The core linking rule: chats whose working dir is the same project are
+	// linked, even across machines (different absolute roots, same leaf) and
+	// regardless of repo string.
 	inv := []Agent{
-		{Name: "z", Repo: "app"},
-		{Name: "a", Repo: "app"},
+		{Name: "local-chat", Dir: "/home/me/workplace/rbg", Where: Local},
+		{Name: "remote-chat", Dir: "/desk/workplace/rbg", Where: Remote},
+		{Name: "other", Dir: "/home/me/workplace/notes", Where: Local},
 	}
-	groups := GroupByRepo(inv)
+	groups := GroupByProject(inv)
+	if len(groups) != 2 {
+		t.Fatalf("got %d groups, want 2 (rbg, notes)", len(groups))
+	}
+	var rbg *ProjectGroup
+	for i := range groups {
+		if groups[i].Project == "rbg" {
+			rbg = &groups[i]
+		}
+	}
+	if rbg == nil {
+		t.Fatalf("no 'rbg' project group; got %+v", groups)
+	}
+	if len(rbg.Agents) != 2 {
+		t.Errorf("same-dir-leaf chats across machines should link into one project, got %d", len(rbg.Agents))
+	}
+}
+
+func TestGroupByProjectAgentsSortedByName(t *testing.T) {
+	inv := []Agent{
+		{Name: "z", Dir: "/w/app"},
+		{Name: "a", Dir: "/w/app"},
+	}
+	groups := GroupByProject(inv)
 	if groups[0].Agents[0].Name != "a" || groups[0].Agents[1].Name != "z" {
 		t.Errorf("agents not name-sorted within group: %q, %q",
 			groups[0].Agents[0].Name, groups[0].Agents[1].Name)
+	}
+}
+
+func TestProjectKeyPrefersDirOverRepo(t *testing.T) {
+	if k := ProjectKey(Agent{Dir: "/home/me/workplace/rbg", Repo: "git@github.com:me/rbg.git"}); k != "rbg" {
+		t.Errorf("ProjectKey with dir = %q, want rbg", k)
+	}
+	if k := ProjectKey(Agent{Repo: "git@github.com:me/app.git"}); k != "app" {
+		t.Errorf("ProjectKey repo fallback = %q, want app", k)
+	}
+	if k := ProjectKey(Agent{}); k != "" {
+		t.Errorf("ProjectKey with nothing = %q, want empty", k)
 	}
 }
