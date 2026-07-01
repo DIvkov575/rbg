@@ -275,3 +275,45 @@ func TestKillUnknownErrors(t *testing.T) {
 		t.Errorf("killing an unknown agent should error")
 	}
 }
+
+func TestRunLeavesStateUnchangedOnLaunchFailure(t *testing.T) {
+	// Launch (not sync) fails: the record must stay Held with no Session/Pid/RunAt
+	// recorded — nothing partial escapes.
+	rem := machine{
+		Source:    fakeSource{},
+		Repo:      fakeRepo{},
+		newRunner: runnerFactory(fakeRunner{launchErr: errors.New("spawn refused")}),
+	}
+	e := newTestEngine(t, machine{Source: fakeSource{}}, rem)
+	e.store.Add(core.Agent{Name: "j", Repo: "r", Dir: "/srv/j", Task: "t", Where: core.Remote, State: core.Held, Origin: core.Managed})
+
+	if err := e.Run("j"); err == nil {
+		t.Fatalf("Run should error when Launch fails")
+	}
+	rec, _ := e.store.Get("j")
+	if rec.State != core.Held {
+		t.Errorf("State = %q, want held (unchanged on launch failure)", rec.State)
+	}
+	if rec.Session != "" || rec.RunAt != "" {
+		t.Errorf("no live identity should be recorded on launch failure: %+v", rec)
+	}
+}
+
+func TestKillRemoteFailureLeavesStateUnchanged(t *testing.T) {
+	// RemoteRunner.Kill fails: the record must NOT be marked Done (the agent may
+	// still be running).
+	rem := machine{
+		Source:    fakeSource{live: []core.Live{{SessionID: "S1", Name: "job", Cwd: "/srv", State: "working"}}},
+		newRunner: runnerFactory(fakeRunner{killErr: errors.New("ssh failed")}),
+	}
+	e := newTestEngine(t, machine{Source: fakeSource{}}, rem)
+	e.store.Add(core.Agent{Name: "job", Session: "S1", Where: core.Remote, State: core.Running, Origin: core.Managed, Task: "t"})
+
+	if err := e.Kill("job"); err == nil {
+		t.Fatalf("Kill should error when the remote kill fails")
+	}
+	rec, _ := e.store.Get("job")
+	if rec.State != core.Running {
+		t.Errorf("State = %q, want running (unchanged when kill failed)", rec.State)
+	}
+}
