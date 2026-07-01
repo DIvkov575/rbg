@@ -26,6 +26,10 @@ func TestOnMachine(t *testing.T) {
 	if len(remote) != 2 {
 		t.Fatalf("Remote: got %d, want 2", len(remote))
 	}
+	if remote[0].Name != "b" || remote[1].Name != "c" {
+		t.Errorf("OnMachine did not preserve input order: got %q, %q; want b, c",
+			remote[0].Name, remote[1].Name)
+	}
 }
 
 func TestGroupByRepoSortedWithNoRepoLast(t *testing.T) {
