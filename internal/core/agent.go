@@ -65,6 +65,7 @@ type Agent struct {
 	Origin  Origin    `json:"origin"`
 	Sync    Sync      `json:"sync"`
 	RunAt   string    `json:"runAt"` // RFC3339 of last run ("" = never)
+	Pid     int       `json:"pid"`   // local child pid for kill (0 for remote; the desktop tracks its own)
 }
 
 // IsHeld reports whether the agent is prepared but not yet launched.

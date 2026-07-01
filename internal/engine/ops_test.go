@@ -16,7 +16,7 @@ func newTestEngine(t *testing.T, local, remote machine) *Engine {
 	if err != nil {
 		t.Fatalf("LoadStore: %v", err)
 	}
-	return &Engine{store: store, local: local, remote: remote}
+	return &Engine{store: store, local: local, remote: remote, now: func() string { return "2026-07-01T00:00:00Z" }}
 }
 
 func findAgent(t *testing.T, agents []core.Agent, name string) core.Agent {
