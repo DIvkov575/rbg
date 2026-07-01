@@ -21,7 +21,7 @@ func TestViewModeCycle(t *testing.T) {
 
 func TestStackPushPopTop(t *testing.T) {
 	base := &listScreen{}
-	m := NewModel(nil)
+	m := &Model{}
 	m.push(base)
 	if m.Top() != base {
 		t.Fatalf("Top after push should be base")
@@ -82,5 +82,30 @@ func TestVisibleAgentsPerView(t *testing.T) {
 	m.View = ViewCombined
 	if v := m.Visible(); len(v) != 2 {
 		t.Errorf("Combined view should show both, got %d", len(v))
+	}
+}
+
+func TestNewModelPushesListScreen(t *testing.T) {
+	m := NewModel(nil)
+	if m.Top() == nil {
+		t.Fatal("NewModel should push the base list screen so the loop has a screen")
+	}
+	if _, ok := m.Top().(*listScreen); !ok {
+		t.Errorf("top screen = %T, want *listScreen", m.Top())
+	}
+}
+
+func TestSetAgentsReplacesInventoryAndClampsCursor(t *testing.T) {
+	m := NewModel([]core.Agent{
+		{Name: "a", Where: core.Remote}, {Name: "b", Where: core.Remote},
+	})
+	m.View = ViewRemote
+	m.Cursor = 1
+	m.SetAgents([]core.Agent{{Name: "only", Where: core.Remote}})
+	if len(m.Agents) != 1 {
+		t.Fatalf("Agents not replaced: %d", len(m.Agents))
+	}
+	if m.Cursor != 0 {
+		t.Errorf("Cursor should clamp to 0 after shrink, got %d", m.Cursor)
 	}
 }
