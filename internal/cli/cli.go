@@ -30,10 +30,17 @@ func Dispatch(args []string, ops Ops, out io.Writer) int {
 		return 2
 	}
 	verb, rest := args[0], args[1:]
-	_ = rest
 	switch verb {
 	case "ls":
 		return doLs(ops, out)
+	case "create":
+		return doCreate(rest, ops, out)
+	case "run":
+		return doName(rest, out, ops.Run)
+	case "adopt":
+		return doName(rest, out, ops.Adopt)
+	case "kill":
+		return doName(rest, out, ops.Kill)
 	default:
 		fmt.Fprintf(out, "rbg: unknown command %q\n\n%s", verb, usage())
 		return 2
@@ -51,6 +58,35 @@ func doLs(ops Ops, out io.Writer) int {
 	if err != nil {
 		return 1
 	}
+	return 0
+}
+
+// doCreate stages a held task from `create <name> <repo> <task>`.
+func doCreate(rest []string, ops Ops, out io.Writer) int {
+	if len(rest) != 3 {
+		fmt.Fprintf(out, "usage: rbg create <name> <repo> <task>\n")
+		return 2
+	}
+	if _, err := ops.Create(core.Agent{Name: rest[0], Repo: rest[1], Task: rest[2]}); err != nil {
+		fmt.Fprintf(out, "rbg: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(out, "created %q (held)\n", rest[0])
+	return 0
+}
+
+// doName runs a one-name operation (run/adopt/kill), mapping a missing name to a
+// usage error and an engine error to exit 1.
+func doName(rest []string, out io.Writer, op func(string) error) int {
+	if len(rest) != 1 {
+		fmt.Fprintf(out, "usage: rbg <verb> <name>\n")
+		return 2
+	}
+	if err := op(rest[0]); err != nil {
+		fmt.Fprintf(out, "rbg: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(out, "ok: %s\n", rest[0])
 	return 0
 }
 
