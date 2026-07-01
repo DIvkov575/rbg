@@ -40,3 +40,22 @@ func (e *Engine) Run(name string) error {
 	}
 	return nil
 }
+
+// Send delivers a follow-up task to a running agent (HLD F4), dispatched to its
+// machine. The identity passed to the runner is machine-specific: the desktop
+// rbg-agent resolves by NAME, while a local resume needs the SESSION id
+// directly. A busy remote agent surfaces host.ErrBusy unchanged.
+func (e *Engine) Send(name, task string) error {
+	a, err := e.find(name)
+	if err != nil {
+		return err
+	}
+	if a.Session == "" {
+		return fmt.Errorf("send: agent %q has not run yet", name)
+	}
+	id := a.Name
+	if a.Where == core.Local {
+		id = a.Session
+	}
+	return e.pick(a.Where).newRunner(a.Dir).Send(id, task)
+}

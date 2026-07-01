@@ -155,3 +155,59 @@ func TestRunUnknownOrUnmanagedErrors(t *testing.T) {
 		t.Errorf("running an unknown agent should error")
 	}
 }
+
+func TestSendRemoteUsesName(t *testing.T) {
+	var sent [2]string
+	rem := machine{
+		Source:    fakeSource{live: []core.Live{{SessionID: "S1", Name: "job", Cwd: "/srv", State: "working"}}},
+		newRunner: runnerFactory(fakeRunner{sent: &sent}),
+	}
+	e := newTestEngine(t, machine{Source: fakeSource{}}, rem)
+	e.store.Add(core.Agent{Name: "job", Session: "S1", Where: core.Remote, State: core.Running, Origin: core.Managed, Task: "t"})
+
+	if err := e.Send("job", "next step"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if sent[0] != "job" || sent[1] != "next step" {
+		t.Errorf("remote Send got %v, want [job, next step] (by name)", sent)
+	}
+}
+
+func TestSendLocalUsesSession(t *testing.T) {
+	var sent [2]string
+	loc := machine{
+		Source:    fakeSource{live: []core.Live{{SessionID: "LS", Name: "loc", Cwd: "/x", State: "working"}}},
+		newRunner: runnerFactory(fakeRunner{sent: &sent}),
+	}
+	e := newTestEngine(t, loc, machine{Source: fakeSource{}})
+	e.store.Add(core.Agent{Name: "loc", Session: "LS", Where: core.Local, State: core.Running, Origin: core.Managed, Task: "t"})
+
+	if err := e.Send("loc", "more"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if sent[0] != "LS" || sent[1] != "more" {
+		t.Errorf("local Send got %v, want [LS, more] (by session)", sent)
+	}
+}
+
+func TestSendPropagatesBusy(t *testing.T) {
+	rem := machine{
+		Source:    fakeSource{live: []core.Live{{SessionID: "S1", Name: "job", Cwd: "/srv", State: "working"}}},
+		newRunner: runnerFactory(fakeRunner{sendErr: host.ErrBusy}),
+	}
+	e := newTestEngine(t, machine{Source: fakeSource{}}, rem)
+	e.store.Add(core.Agent{Name: "job", Session: "S1", Where: core.Remote, State: core.Running, Origin: core.Managed, Task: "t"})
+
+	err := e.Send("job", "x")
+	if err != host.ErrBusy {
+		t.Errorf("Send err = %v, want host.ErrBusy", err)
+	}
+}
+
+func TestSendToNeverRunErrors(t *testing.T) {
+	e := newTestEngine(t, machine{Source: fakeSource{}}, machine{Source: fakeSource{}})
+	e.store.Add(core.Agent{Name: "held", Task: "t", State: core.Held, Origin: core.Managed})
+	if err := e.Send("held", "x"); err == nil {
+		t.Errorf("sending to a never-run agent should error")
+	}
+}
