@@ -84,3 +84,24 @@ func NewSessionID() string {
 	b[8] = (b[8] & 0x3f) | 0x80 // variant
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
+
+// DeriveSync computes an agent's repo Sync state from observed git facts. The
+// priority is deliberate: uncommitted local changes (dirty) are the most
+// actionable warning before running a delegated task, so they win over any
+// commit divergence; without an upstream, ahead/behind is unknowable so the
+// state is SyncUnknown (unless dirty). When an upstream exists and the tree is
+// clean: behind (needs a pull before running) outranks ahead, else Aligned.
+func DeriveSync(hasUpstream bool, behind, ahead int, dirty bool) Sync {
+	switch {
+	case dirty:
+		return Dirty
+	case !hasUpstream:
+		return SyncUnknown
+	case behind > 0:
+		return Behind
+	case ahead > 0:
+		return Ahead
+	default:
+		return Aligned
+	}
+}

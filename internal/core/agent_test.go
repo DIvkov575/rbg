@@ -91,3 +91,30 @@ func TestNewSessionIDShapeAndUniqueness(t *testing.T) {
 		t.Errorf("variant nibble = %q, want one of 8/9/a/b", groups[3][0])
 	}
 }
+
+func TestDeriveSync(t *testing.T) {
+	cases := []struct {
+		name        string
+		hasUpstream bool
+		behind      int
+		ahead       int
+		dirty       bool
+		want        Sync
+	}{
+		{"clean aligned", true, 0, 0, false, Aligned},
+		{"behind", true, 3, 0, false, Behind},
+		{"ahead", true, 0, 2, false, Ahead},
+		{"dirty beats behind", true, 5, 0, true, Dirty},
+		{"dirty beats ahead", true, 0, 5, true, Dirty},
+		{"behind beats ahead when diverged", true, 1, 1, false, Behind},
+		{"no upstream clean is unknown", false, 0, 0, false, SyncUnknown},
+		{"no upstream but dirty is dirty", false, 0, 0, true, Dirty},
+	}
+	for _, c := range cases {
+		got := DeriveSync(c.hasUpstream, c.behind, c.ahead, c.dirty)
+		if got != c.want {
+			t.Errorf("%s: DeriveSync(%v,%d,%d,%v) = %q, want %q",
+				c.name, c.hasUpstream, c.behind, c.ahead, c.dirty, got, c.want)
+		}
+	}
+}
