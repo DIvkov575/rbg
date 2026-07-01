@@ -10,9 +10,9 @@ import (
 
 func TestLocalRepoStatusAligned(t *testing.T) {
 	r := &run.Recording{BySubstring: map[string]run.Result{
-		"status":    {Stdout: []byte(""), Code: 0},        // clean
+		"status":    {Stdout: []byte(""), Code: 0},              // clean
 		"rev-parse": {Stdout: []byte("origin/main\n"), Code: 0}, // has upstream
-		"rev-list":  {Stdout: []byte("0\t0\n"), Code: 0},   // 0 behind, 0 ahead
+		"rev-list":  {Stdout: []byte("0\t0\n"), Code: 0},        // 0 behind, 0 ahead
 	}}
 	got, err := LocalRepo{R: r}.Status("/repo")
 	if err != nil {
