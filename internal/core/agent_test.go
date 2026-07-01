@@ -18,6 +18,7 @@ func TestAgentJSONRoundTrip(t *testing.T) {
 		Origin:  Managed,
 		Sync:    Behind,
 		RunAt:   "2026-06-30T12:00:00Z",
+		Pid:     4321,
 	}
 	data, err := json.Marshal(a)
 	if err != nil {
