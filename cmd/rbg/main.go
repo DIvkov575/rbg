@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/divkov575/rbg/internal/cli"
-	"github.com/divkov575/rbg/internal/client"
 	"github.com/divkov575/rbg/internal/config"
 	"github.com/divkov575/rbg/internal/engine"
 	"github.com/divkov575/rbg/internal/run"
@@ -121,7 +120,7 @@ func runLegacy(verb string, rest []string) int {
 	case "deploy":
 		return deploy(cfg, r)
 	case "ping":
-		return client.Ping(cfg, r, os.Stdout)
+		return doPing(cfg, r)
 	case "attach":
 		if len(rest) < 1 {
 			fmt.Fprintln(os.Stderr, "rbg: attach requires <name>")
@@ -166,4 +165,15 @@ func ensureControlDir(controlPath string) {
 		}
 	}
 	_ = os.MkdirAll(filepath.Dir(controlPath), 0o700)
+}
+
+// doPing reports whether the desktop is reachable, replacing the retired
+// client.Ping (a thin wrapper over sshx.Reachable).
+func doPing(cfg *config.Config, r run.Runner) int {
+	if sshx.Reachable(cfg, r) {
+		fmt.Fprintf(os.Stdout, "%s: reachable\n", cfg.Host)
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "cannot reach '%s' — disconnected\n", cfg.Host)
+	return 1
 }
