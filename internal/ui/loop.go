@@ -82,7 +82,8 @@ func applyAction(m *Model, ops Ops, act Action) bool {
 			m.Status = "read failed: " + err.Error()
 			return false
 		}
-		lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+		normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
+		lines := strings.Split(strings.TrimRight(normalized, "\n"), "\n")
 		m.push(newPagerScreen("transcript: "+act.Name, lines))
 	}
 	return false

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/divkov575/rbg/internal/core"
@@ -58,6 +59,24 @@ func TestApplyActionReadPushesPager(t *testing.T) {
 	}
 	if _, ok := m.Top().(*pagerScreen); !ok {
 		t.Errorf("ActRead should push a pager, top is %T", m.Top())
+	}
+}
+
+func TestApplyActionReadNormalizesCRLF(t *testing.T) {
+	ops := &fakeOps{readData: []byte("alpha\r\nbeta\r\n")}
+	m := NewModel(nil)
+	applyAction(m, ops, Action{Kind: ActRead, Name: "foo"})
+	p, ok := m.Top().(*pagerScreen)
+	if !ok {
+		t.Fatalf("expected pager on top, got %T", m.Top())
+	}
+	for i, ln := range p.lines {
+		if strings.Contains(ln, "\r") {
+			t.Errorf("line %d still has a carriage return: %q", i, ln)
+		}
+	}
+	if len(p.lines) != 2 || p.lines[0] != "alpha" || p.lines[1] != "beta" {
+		t.Errorf("lines = %#v, want [alpha beta]", p.lines)
 	}
 }
 
