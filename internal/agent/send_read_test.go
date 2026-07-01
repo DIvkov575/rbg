@@ -194,6 +194,54 @@ func TestKill_TerminatesLiveProcAndForgetsKeepingTranscript(t *testing.T) {
 	}
 }
 
+// Regression (central-view kill): the laptop addresses a remote agent by its
+// claude SESSION id, which differs from rbg-agent's stored name. Kill must
+// resolve --id by session id as a fallback, or killing from the central view
+// fails with "unknown agent". This is the fix for foreign-remote kill.
+func TestKill_ResolvesBySessionID(t *testing.T) {
+	a := newAgent(t, &run.Recording{})
+	sid := "abcd1234-0000-1111-2222-333344445555"
+	store, _ := session.Load(a.StatePath)
+	// rbg-agent stored it under the name "job", but the caller only knows the id.
+	store.Add(session.Session{Name: "job", ClaudeSessionID: sid, PID: 4242})
+	store.Save()
+
+	var killed int
+	a.KillProc = func(pid int) error { killed = pid; return nil }
+	var out bytes.Buffer
+	if code := a.Kill(&out, sid); code != 0 { // address by SESSION id, not name
+		t.Fatalf("Kill by session id code=%d out=%s", code, out.String())
+	}
+	if killed != 4242 {
+		t.Errorf("expected to signal pid 4242, got %d", killed)
+	}
+	s2, _ := session.Load(a.StatePath)
+	if _, ok := s2.Get("job"); ok {
+		t.Error("job should be forgotten (deleted by its store key, not the passed id)")
+	}
+}
+
+func TestSend_ResolvesBySessionID(t *testing.T) {
+	a := newAgent(t, &run.Recording{Default: run.Result{Code: 0}})
+	sid := "abcd1234-0000-1111-2222-333344445555"
+	store, _ := session.Load(a.StatePath)
+	store.Add(session.Session{Name: "job", ClaudeSessionID: sid})
+	store.Save()
+	var gotArgs []string
+	a.Spawn = func(name string, args []string, stdoutPath, dir string) (int, error) {
+		gotArgs = args
+		return 1, nil
+	}
+	var out bytes.Buffer
+	if code := a.Send(&out, sid, "follow up"); code != 0 { // address by session id
+		t.Fatalf("Send by session id code=%d out=%s", code, out.String())
+	}
+	// the resume must target the claude session id
+	if !strings.Contains(strings.Join(gotArgs, " "), sid) {
+		t.Errorf("resume args should carry the session id %s: %v", sid, gotArgs)
+	}
+}
+
 func TestKill_UnknownAgent(t *testing.T) {
 	a := newAgent(t, &run.Recording{})
 	a.KillProc = func(pid int) error { return nil }

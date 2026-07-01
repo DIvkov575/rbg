@@ -326,7 +326,9 @@ func TestRunUnknownOrUnmanagedErrors(t *testing.T) {
 	}
 }
 
-func TestSendRemoteUsesName(t *testing.T) {
+func TestSendRemoteUsesSession(t *testing.T) {
+	// Remote send now addresses the agent by its claude session id (rbg-agent
+	// resolves --id by session id), so foreign remote agents are reachable too.
 	var sent [2]string
 	rem := machine{
 		Source:    fakeSource{live: []core.Live{{SessionID: "S1", Name: "job", Cwd: "/srv", State: "working"}}},
@@ -338,8 +340,8 @@ func TestSendRemoteUsesName(t *testing.T) {
 	if err := e.Send("job", "next step"); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if sent[0] != "job" || sent[1] != "next step" {
-		t.Errorf("remote Send got %v, want [job, next step] (by name)", sent)
+	if sent[0] != "S1" || sent[1] != "next step" {
+		t.Errorf("remote Send got %v, want [S1, next step] (by session id)", sent)
 	}
 }
 
@@ -394,8 +396,8 @@ func TestKillRemoteCallsRunnerKill(t *testing.T) {
 	if err := e.Kill("job"); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
-	if killed != "job" {
-		t.Errorf("remote Kill got %q, want job", killed)
+	if killed != "S1" {
+		t.Errorf("remote Kill got %q, want S1 (by session id)", killed)
 	}
 	rec, _ := e.store.Get("job")
 	if rec.State != core.Done {

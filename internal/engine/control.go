@@ -89,9 +89,10 @@ func (e *Engine) Run(name string) error {
 }
 
 // Send delivers a follow-up task to a running agent (HLD F4), dispatched to its
-// machine. The identity passed to the runner is machine-specific: the desktop
-// rbg-agent resolves by NAME, while a local resume needs the SESSION id
-// directly. A busy remote agent surfaces host.ErrBusy unchanged.
+// machine. Both machines are addressed by the claude SESSION id: a local resume
+// needs it directly, and the desktop rbg-agent resolves --id by session id (as
+// well as by its own stored name), so this reaches foreign remote agents too. A
+// busy remote agent surfaces host.ErrBusy unchanged.
 func (e *Engine) Send(name, task string) error {
 	a, err := e.find(name)
 	if err != nil {
@@ -100,11 +101,7 @@ func (e *Engine) Send(name, task string) error {
 	if a.Session == "" {
 		return fmt.Errorf("send: agent %q has not run yet", name)
 	}
-	id := a.Name
-	if a.Where == core.Local {
-		id = a.Session
-	}
-	return e.pick(a.Where).newRunner(a.Dir).Send(id, task)
+	return e.pick(a.Where).newRunner(a.Dir).Send(a.Session, task)
 }
 
 // Kill stops an agent (HLD F4). A remote agent is stopped via the desktop
@@ -131,7 +128,15 @@ func (e *Engine) Kill(name string) error {
 			return fmt.Errorf("kill: local agent %q: %w", name, err)
 		}
 	} else {
-		if err := e.pick(core.Remote).newRunner(a.Dir).Kill(a.Name); err != nil {
+		// Address the remote agent by its claude session id when we have one: the
+		// desktop rbg-agent resolves --id by session id as well as by its own
+		// stored name, so this reaches foreign remote agents too. Fall back to the
+		// name for a staged agent that hasn't run (no session yet).
+		id := a.Session
+		if id == "" {
+			id = a.Name
+		}
+		if err := e.pick(core.Remote).newRunner(a.Dir).Kill(id); err != nil {
 			return fmt.Errorf("kill: remote agent %q: %w", name, err)
 		}
 	}

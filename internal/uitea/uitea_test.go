@@ -190,13 +190,14 @@ func TestCreateEmptyTaskStays(t *testing.T) {
 func TestTabCyclesLens(t *testing.T) {
 	o := &recOps{agents: []core.Agent{remote("a")}}
 	m := loaded(o)
-	if m.view != viewRemote {
-		t.Fatalf("initial view = %v", m.view)
+	// Default is combined (so local + remote agents are visible on open).
+	if m.view != viewCombined {
+		t.Fatalf("initial view = %v, want combined", m.view)
 	}
 	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = mm.(Model)
-	if m.view != viewLocal {
-		t.Errorf("tab should advance to local, got %v", m.view)
+	if m.view != viewProject {
+		t.Errorf("tab from combined should advance to project, got %v", m.view)
 	}
 }
 

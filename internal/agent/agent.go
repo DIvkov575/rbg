@@ -116,6 +116,24 @@ func resolveName(store *session.Store, explicit, task string) string {
 	}
 }
 
+// resolve looks up a session by id: first by rbg-agent's own store key (the
+// name it assigned at launch), then falling back to matching the claude session
+// id. The fallback lets the laptop kill/send/read a REMOTE agent by its stable
+// claude session id — which the central `rbg ls` view knows for every agent —
+// even when rbg-agent recorded it under a different name (or the caller is
+// addressing a foreign agent by session id).
+func resolve(store *session.Store, id string) (session.Session, bool) {
+	if sess, ok := store.Get(id); ok {
+		return sess, true
+	}
+	for _, sess := range store.Sessions {
+		if sess.ClaudeSessionID == id {
+			return sess, true
+		}
+	}
+	return session.Session{}, false
+}
+
 // Launch starts a --bg claude agent, resolves its session id, records it, and
 // prints {"id","claudeSessionId"} as JSON.
 func (a *Agent) Launch(out io.Writer, name, task string) int {
@@ -198,18 +216,20 @@ func (a *Agent) Send(out io.Writer, name, task string) int {
 		fmt.Fprintf(out, "rbg-agent: %v\n", err)
 		return 1
 	}
-	sess, ok := store.Get(name)
+	sess, ok := resolve(store, name)
 	if !ok {
 		fmt.Fprintf(out, "rbg-agent: unknown agent %q\n", name)
 		return 1
 	}
-	lock, ok, err := session.TryLock(a.lockPath(name))
+	// Lock/log by the resolved store key so the busy guard is stable regardless
+	// of whether the caller addressed the agent by name or by session id.
+	lock, ok, err := session.TryLock(a.lockPath(sess.Name))
 	if err != nil {
 		fmt.Fprintf(out, "rbg-agent: %v\n", err)
 		return 1
 	}
 	if !ok {
-		fmt.Fprintf(out, "rbg-agent: session %q busy\n", name)
+		fmt.Fprintf(out, "rbg-agent: session %q busy\n", sess.Name)
 		return 3
 	}
 	// NOTE: we intentionally release the lock once the child is launched; the
@@ -222,7 +242,7 @@ func (a *Agent) Send(out io.Writer, name, task string) int {
 		spawn = DefaultSpawn
 	}
 	args := append([]string{claudeBin}, claudecli.ResumeHeadlessArgs(sess.ClaudeSessionID, task)...)
-	pid, err := spawn(args[0], args[1:], a.sendLogPath(name), a.LaunchDir)
+	pid, err := spawn(args[0], args[1:], a.sendLogPath(sess.Name), a.LaunchDir)
 	if err != nil {
 		fmt.Fprintf(out, "rbg-agent: spawn failed: %v\n", err)
 		return 1
@@ -230,7 +250,7 @@ func (a *Agent) Send(out io.Writer, name, task string) int {
 	sess.PID = pid
 	store.Add(sess) // persist the new child's pid for a later kill
 	_ = store.Save()
-	json.NewEncoder(out).Encode(map[string]string{"ok": "sent", "id": name})
+	json.NewEncoder(out).Encode(map[string]string{"ok": "sent", "id": sess.Name})
 	return 0
 }
 
@@ -242,7 +262,7 @@ func (a *Agent) Read(out io.Writer, name string) int {
 		fmt.Fprintf(out, "rbg-agent: %v\n", err)
 		return 1
 	}
-	sess, ok := store.Get(name)
+	sess, ok := resolve(store, name)
 	if !ok {
 		fmt.Fprintf(out, "rbg-agent: unknown agent %q\n", name)
 		return 1
@@ -273,7 +293,7 @@ func (a *Agent) Kill(out io.Writer, name string) int {
 		fmt.Fprintf(out, "rbg-agent: %v\n", err)
 		return 1
 	}
-	sess, ok := store.Get(name)
+	sess, ok := resolve(store, name)
 	if !ok {
 		fmt.Fprintf(out, "rbg-agent: unknown agent %q\n", name)
 		return 1
@@ -286,12 +306,12 @@ func (a *Agent) Kill(out io.Writer, name string) int {
 		// Best-effort: the child is detached and often already exited.
 		_ = kill(sess.PID)
 	}
-	store.Delete(name)
+	store.Delete(sess.Name) // sess.Name is the store key (name may be a session id)
 	if err := store.Save(); err != nil {
 		fmt.Fprintf(out, "rbg-agent: %v\n", err)
 		return 1
 	}
-	json.NewEncoder(out).Encode(map[string]string{"ok": "killed", "id": name})
+	json.NewEncoder(out).Encode(map[string]string{"ok": "killed", "id": sess.Name})
 	return 0
 }
 

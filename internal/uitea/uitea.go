@@ -67,7 +67,10 @@ type Model struct {
 
 // New builds a dashboard model over ops.
 func New(ops Ops) Model {
-	return Model{ops: ops, view: viewRemote}
+	// Default to the combined lens: most agents (and every newly-created managed
+	// one) live locally, so defaulting to the remote-only lens hid them and made
+	// the dashboard look empty. Combined shows both machines at once.
+	return Model{ops: ops, view: viewCombined}
 }
 
 // Init kicks off the first inventory load.
