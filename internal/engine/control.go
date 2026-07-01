@@ -113,6 +113,13 @@ func (e *Engine) Kill(name string) error {
 	if err != nil {
 		return err
 	}
+	if a.State == core.Done {
+		// Already finished — nothing to stop. Killing a done agent is a no-op
+		// success, not an error (the process is gone; rbg-agent/claude would just
+		// report "unknown"). Persist Done for a managed record and return clean.
+		e.markDone(name)
+		return nil
+	}
 	if a.Where == core.Local {
 		if a.Pid <= 0 {
 			// Only agents rbg launched locally carry a tracked pid. `claude agents`
@@ -140,6 +147,15 @@ func (e *Engine) Kill(name string) error {
 			return fmt.Errorf("kill: remote agent %q: %w", name, err)
 		}
 	}
+	if err := e.markDone(name); err != nil {
+		return err
+	}
+	return nil
+}
+
+// markDone marks a managed record Done and persists it; a no-op for a foreign
+// agent not in the store.
+func (e *Engine) markDone(name string) error {
 	if rec, ok := e.store.Get(name); ok {
 		rec.State = core.Done
 		e.store.Add(rec)

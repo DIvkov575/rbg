@@ -467,6 +467,25 @@ func TestKillUnknownErrors(t *testing.T) {
 	}
 }
 
+func TestKillDoneRemoteAgentIsNoOpSuccess(t *testing.T) {
+	// Regression: killing a remote agent that already finished must NOT hit the
+	// runner (whose rbg-agent would report "unknown agent <sid>") and must NOT
+	// error — the process is gone. It's a clean no-op.
+	var killed string
+	rem := machine{
+		Source:    fakeSource{live: []core.Live{{SessionID: "S1", Name: "gone", Cwd: "/srv", State: "done"}}},
+		newRunner: runnerFactory(fakeRunner{killed: &killed}),
+	}
+	e := newTestEngine(t, machine{Source: fakeSource{}}, rem)
+
+	if err := e.Kill("gone"); err != nil {
+		t.Fatalf("killing a done remote agent should be a no-op success, got %v", err)
+	}
+	if killed != "" {
+		t.Errorf("must not call the remote runner for a done agent, but killed %q", killed)
+	}
+}
+
 func TestRunLeavesStateUnchangedOnLaunchFailure(t *testing.T) {
 	// Launch (not sync) fails: the record must stay Held with no Session/Pid/RunAt
 	// recorded — nothing partial escapes.
