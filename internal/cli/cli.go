@@ -70,11 +70,10 @@ func doLs(ops Ops, out, errOut io.Writer) int {
 	return 0
 }
 
-// doCreate stages a held task from `create [--local|--remote] <name> <repo> <task>`.
-// The machine flag is optional and defaults to local (the engine chooses the
-// laptop when Where is unset); pass --remote to delegate to the desktop. This
-// makes the target machine an explicit choice rather than an unset field that
-// silently routes.
+// doCreate stages a held task from `create [--local|--remote] [<repo>] <task>`.
+// The name is auto-derived from the task by the engine, so it isn't asked for.
+// The machine flag is optional and defaults to local; pass --remote to delegate
+// to the desktop. One positional is the task; two positionals are <repo> <task>.
 func doCreate(rest []string, ops Ops, out, errOut io.Writer) int {
 	var where core.Location
 	// Optional leading machine flag.
@@ -86,15 +85,22 @@ func doCreate(rest []string, ops Ops, out, errOut io.Writer) int {
 			where, rest = core.Remote, rest[1:]
 		}
 	}
-	if len(rest) != 3 {
-		fmt.Fprintf(errOut, "usage: rbg create [--local|--remote] <name> <repo> <task>\n")
+	var repo, task string
+	switch len(rest) {
+	case 1:
+		task = rest[0]
+	case 2:
+		repo, task = rest[0], rest[1]
+	default:
+		fmt.Fprintf(errOut, "usage: rbg create [--local|--remote] [<repo>] <task>\n")
 		return 2
 	}
-	if _, err := ops.Create(core.Agent{Name: rest[0], Repo: rest[1], Task: rest[2], Where: where}); err != nil {
+	got, err := ops.Create(core.Agent{Repo: repo, Task: task, Where: where})
+	if err != nil {
 		fmt.Fprintf(errOut, "rbg: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(out, "created %q (held)\n", rest[0])
+	fmt.Fprintf(out, "created %q (held)\n", got.Name)
 	return 0
 }
 
@@ -156,7 +162,7 @@ func usage() string {
 
 Commands:
   ls                       list all agents (both machines)
-  create [--local|--remote] <name> <repo> <task>   stage a held task (default local)
+  create [--local|--remote] [<repo>] <task>   stage a held task (name auto-derived; default local)
   run <name>               launch (or re-run) a staged agent, sync-first
   send <name> <task>       send a follow-up to a running agent
   read <name>              print an agent's transcript

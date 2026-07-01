@@ -116,12 +116,16 @@ func TestEnterReadsTranscriptAndOpensPager(t *testing.T) {
 	}
 }
 
-func TestCreateFlowCollectsNameRepoTask(t *testing.T) {
+func TestCreateFlowCollectsRepoThenTask(t *testing.T) {
+	// The name is auto-derived by the engine, so the flow only asks repo → task.
 	o := &recOps{}
 	m := loaded(o)
 	m, _ = stepRune(m, 'n') // open create
 	if m.mode != modeInput {
 		t.Fatal("n should open the input overlay")
+	}
+	if m.input.stage != stageRepo {
+		t.Fatalf("create should start on the repo stage, got %d", m.input.stage)
 	}
 	typeStr := func(m Model, s string) Model {
 		for _, r := range s {
@@ -133,8 +137,6 @@ func TestCreateFlowCollectsNameRepoTask(t *testing.T) {
 		mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		return mm.(Model), cmd
 	}
-	m = typeStr(m, "my-agent")
-	m, _ = enter(m) // name → repo stage
 	m = typeStr(m, "app")
 	m, _ = enter(m) // repo → task stage
 	m = typeStr(m, "do the thing")
@@ -143,25 +145,45 @@ func TestCreateFlowCollectsNameRepoTask(t *testing.T) {
 		t.Fatal("final enter should dispatch a create command")
 	}
 	cmd()
-	if o.created.Name != "my-agent" || o.created.Repo != "app" || o.created.Task != "do the thing" {
+	if o.created.Repo != "app" || o.created.Task != "do the thing" {
 		t.Errorf("created spec wrong: %+v", o.created)
+	}
+	if o.created.Name != "" {
+		t.Errorf("UI should not set a name (engine derives it), got %q", o.created.Name)
 	}
 	if m.mode != modeList {
 		t.Errorf("create should return to the list, mode=%d", m.mode)
 	}
 }
 
-func TestCreateEmptyNameStays(t *testing.T) {
+func TestCreateEmptyRepoAdvancesToTask(t *testing.T) {
+	// Repo is optional: pressing enter on a blank repo advances to the task stage.
 	o := &recOps{}
 	m := loaded(o)
 	m, _ = stepRune(m, 'n')
-	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // empty name
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // empty repo
 	m = mm.(Model)
 	if cmd != nil {
-		t.Error("empty name should not dispatch")
+		t.Error("empty repo should not dispatch, just advance")
 	}
-	if m.mode != modeInput || m.input.stage != stageName {
-		t.Errorf("empty name should stay on the name stage")
+	if m.mode != modeInput || m.input.stage != stageTask {
+		t.Errorf("empty repo should advance to the task stage, got mode=%d stage=%d", m.mode, m.input.stage)
+	}
+}
+
+func TestCreateEmptyTaskStays(t *testing.T) {
+	o := &recOps{}
+	m := loaded(o)
+	m, _ = stepRune(m, 'n')
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // blank repo → task stage
+	m = mm.(Model)
+	mm2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // empty task
+	m = mm2.(Model)
+	if cmd != nil {
+		t.Error("empty task should not dispatch")
+	}
+	if m.mode != modeInput || m.input.stage != stageTask {
+		t.Errorf("empty task should stay on the task stage")
 	}
 }
 

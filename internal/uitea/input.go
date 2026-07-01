@@ -14,12 +14,12 @@ const (
 	inputSend                    // single task, then Send to target
 )
 
-// inputStage tracks which create field is being entered.
+// inputStage tracks which create field is being entered. Names are auto-derived
+// by the engine from the task, so the create flow only collects repo then task.
 type inputStage int
 
 const (
-	stageName inputStage = iota
-	stageRepo
+	stageRepo inputStage = iota
 	stageTask
 )
 
@@ -29,12 +29,11 @@ type inputModel struct {
 	kind   inputKind
 	target string // agent name (send)
 	stage  inputStage
-	name   string // committed create fields
-	repo   string
+	repo   string // committed create field
 	buf    string
 }
 
-func newCreateInput() inputModel { return inputModel{kind: inputCreate, stage: stageName} }
+func newCreateInput() inputModel { return inputModel{kind: inputCreate, stage: stageRepo} }
 func newSendInput(target string) inputModel {
 	return inputModel{kind: inputSend, target: target}
 }
@@ -77,16 +76,9 @@ func (in inputModel) submit() (inputModel, bool, any) {
 		}
 		return in, true, sendDone{target: in.target, task: val}
 	}
-	// create: name → repo(optional) → task
+	// create: repo(optional) → task. The name is auto-derived from the task by
+	// the engine, so it isn't collected here.
 	switch in.stage {
-	case stageName:
-		if val == "" {
-			return in, false, nil // name required; stay
-		}
-		in.name = val
-		in.buf = ""
-		in.stage = stageRepo
-		return in, false, nil
 	case stageRepo:
 		in.repo = val // optional
 		in.buf = ""
@@ -96,7 +88,7 @@ func (in inputModel) submit() (inputModel, bool, any) {
 		if val == "" {
 			return in, false, nil // task required; stay
 		}
-		return in, true, createDone{spec: core.Agent{Name: in.name, Repo: in.repo, Task: val}}
+		return in, true, createDone{spec: core.Agent{Repo: in.repo, Task: val}}
 	}
 }
 
@@ -106,11 +98,9 @@ func (in inputModel) prompt() string {
 		return "Follow-up to " + in.target
 	}
 	switch in.stage {
-	case stageName:
-		return "New agent · name (1/3)"
 	case stageRepo:
-		return "New agent · repo, blank for none (2/3)"
+		return "New agent · repo, blank for none (1/2)"
 	default:
-		return "New agent · task (3/3)"
+		return "New agent · task (2/2)"
 	}
 }

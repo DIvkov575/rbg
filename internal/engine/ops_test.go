@@ -146,13 +146,31 @@ func TestCreateKeepsExplicitDir(t *testing.T) {
 	}
 }
 
-func TestCreateRejectsBlankTaskAndName(t *testing.T) {
+func TestCreateRejectsBlankTask(t *testing.T) {
 	e := newTestEngine(t, machine{}, machine{})
 	if _, err := e.Create(core.Agent{Name: "x", Task: ""}); err == nil {
 		t.Errorf("blank task should error (no blank agents)")
 	}
-	if _, err := e.Create(core.Agent{Name: "", Task: "t"}); err == nil {
-		t.Errorf("blank name should error")
+}
+
+func TestCreateAutoDerivesNameFromTask(t *testing.T) {
+	// No name given: the engine derives a readable slug from the task, and dedups
+	// it if that slug is already taken.
+	e := newTestEngine(t, machine{}, machine{})
+	got, err := e.Create(core.Agent{Task: "refactor the parser module"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got.Name == "" {
+		t.Fatal("Create should auto-derive a non-empty name from the task")
+	}
+	// A second create with an overlapping-slug task must not collide.
+	got2, err := e.Create(core.Agent{Task: "refactor the parser module"})
+	if err != nil {
+		t.Fatalf("second Create: %v", err)
+	}
+	if got2.Name == got.Name {
+		t.Errorf("duplicate derived names not deduped: both %q", got.Name)
 	}
 }
 
