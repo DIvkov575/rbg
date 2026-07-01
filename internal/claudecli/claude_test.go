@@ -20,3 +20,11 @@ func TestResumeHeadlessArgs(t *testing.T) {
 		t.Errorf("got %v want %v", got, want)
 	}
 }
+
+func TestAgentsListArgs(t *testing.T) {
+	got := AgentsListArgs()
+	want := []string{"agents", "--json", "--all"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v want %v", got, want)
+	}
+}
