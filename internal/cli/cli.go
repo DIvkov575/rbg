@@ -26,41 +26,42 @@ type Ops interface {
 	Adopt(name string) error
 }
 
-// Dispatch parses args (verb + operands), invokes ops, writes output to out,
-// and returns a process exit code (0 = success, non-zero = error/usage).
-func Dispatch(args []string, ops Ops, out io.Writer) int {
+// Exit codes: 0 ok, 1 engine error, 2 usage/unknown-verb, 3 agent busy.
+// Data (agent lists, transcripts) goes to out; errors, warnings, and usage go
+// to errOut, so `rbg ls > file` captures only data.
+func Dispatch(args []string, ops Ops, out, errOut io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprint(out, usage())
+		fmt.Fprint(errOut, usage())
 		return 2
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
 	case "ls":
-		return doLs(ops, out)
+		return doLs(ops, out, errOut)
 	case "create":
-		return doCreate(rest, ops, out)
+		return doCreate(rest, ops, out, errOut)
 	case "run":
-		return doName(rest, out, ops.Run)
+		return doName(rest, out, errOut, ops.Run)
 	case "adopt":
-		return doName(rest, out, ops.Adopt)
+		return doName(rest, out, errOut, ops.Adopt)
 	case "kill":
-		return doName(rest, out, ops.Kill)
+		return doName(rest, out, errOut, ops.Kill)
 	case "send":
-		return doSend(rest, ops, out)
+		return doSend(rest, ops, out, errOut)
 	case "read":
-		return doRead(rest, ops, out)
+		return doRead(rest, ops, out, errOut)
 	default:
-		fmt.Fprintf(out, "rbg: unknown command %q\n\n%s", verb, usage())
+		fmt.Fprintf(errOut, "rbg: unknown command %q\n\n%s", verb, usage())
 		return 2
 	}
 }
 
 // doLs renders the reconciled inventory. A degraded list (unreachable machine)
-// still renders the usable agents, prefixed with a warning, and exits non-zero.
-func doLs(ops Ops, out io.Writer) int {
+// still renders the usable agents, with a warning to errOut, and exits non-zero.
+func doLs(ops Ops, out, errOut io.Writer) int {
 	agents, err := ops.List()
 	if err != nil {
-		fmt.Fprintf(out, "warning: inventory may be incomplete: %v\n", err)
+		fmt.Fprintf(errOut, "warning: inventory may be incomplete: %v\n", err)
 	}
 	fmt.Fprint(out, renderAgents(agents))
 	if err != nil {
@@ -70,13 +71,13 @@ func doLs(ops Ops, out io.Writer) int {
 }
 
 // doCreate stages a held task from `create <name> <repo> <task>`.
-func doCreate(rest []string, ops Ops, out io.Writer) int {
+func doCreate(rest []string, ops Ops, out, errOut io.Writer) int {
 	if len(rest) != 3 {
-		fmt.Fprintf(out, "usage: rbg create <name> <repo> <task>\n")
+		fmt.Fprintf(errOut, "usage: rbg create <name> <repo> <task>\n")
 		return 2
 	}
 	if _, err := ops.Create(core.Agent{Name: rest[0], Repo: rest[1], Task: rest[2]}); err != nil {
-		fmt.Fprintf(out, "rbg: %v\n", err)
+		fmt.Fprintf(errOut, "rbg: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(out, "created %q (held)\n", rest[0])
@@ -85,13 +86,13 @@ func doCreate(rest []string, ops Ops, out io.Writer) int {
 
 // doName runs a one-name operation (run/adopt/kill), mapping a missing name to a
 // usage error and an engine error to exit 1.
-func doName(rest []string, out io.Writer, op func(string) error) int {
+func doName(rest []string, out, errOut io.Writer, op func(string) error) int {
 	if len(rest) != 1 {
-		fmt.Fprintf(out, "usage: rbg <verb> <name>\n")
+		fmt.Fprintf(errOut, "usage: rbg <verb> <name>\n")
 		return 2
 	}
 	if err := op(rest[0]); err != nil {
-		fmt.Fprintf(out, "rbg: %v\n", err)
+		fmt.Fprintf(errOut, "rbg: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(out, "ok: %s\n", rest[0])
@@ -100,17 +101,17 @@ func doName(rest []string, out io.Writer, op func(string) error) int {
 
 // doSend delivers a follow-up task from `send <name> <task>`. A busy agent is
 // reported clearly (host.ErrBusy), distinct from other failures.
-func doSend(rest []string, ops Ops, out io.Writer) int {
+func doSend(rest []string, ops Ops, out, errOut io.Writer) int {
 	if len(rest) != 2 {
-		fmt.Fprintf(out, "usage: rbg send <name> <task>\n")
+		fmt.Fprintf(errOut, "usage: rbg send <name> <task>\n")
 		return 2
 	}
 	if err := ops.Send(rest[0], rest[1]); err != nil {
 		if errors.Is(err, host.ErrBusy) {
-			fmt.Fprintf(out, "rbg: %q is busy — a send is already running\n", rest[0])
+			fmt.Fprintf(errOut, "rbg: %q is busy — a send is already running\n", rest[0])
 			return 3
 		}
-		fmt.Fprintf(out, "rbg: %v\n", err)
+		fmt.Fprintf(errOut, "rbg: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(out, "sent to %s\n", rest[0])
@@ -118,14 +119,14 @@ func doSend(rest []string, ops Ops, out io.Writer) int {
 }
 
 // doRead prints an agent's transcript, rendering the raw JSONL to human text.
-func doRead(rest []string, ops Ops, out io.Writer) int {
+func doRead(rest []string, ops Ops, out, errOut io.Writer) int {
 	if len(rest) != 1 {
-		fmt.Fprintf(out, "usage: rbg read <name>\n")
+		fmt.Fprintf(errOut, "usage: rbg read <name>\n")
 		return 2
 	}
 	data, err := ops.Read(rest[0])
 	if err != nil {
-		fmt.Fprintf(out, "rbg: %v\n", err)
+		fmt.Fprintf(errOut, "rbg: %v\n", err)
 		return 1
 	}
 	render.Stream(strings.Split(string(data), "\n"), out)

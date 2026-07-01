@@ -45,7 +45,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "rbg: %v\n", err)
 			os.Exit(2)
 		}
-		os.Exit(cli.Dispatch(args, e, os.Stdout))
+		os.Exit(cli.Dispatch(args, e, os.Stdout, os.Stderr))
 	}
 	fmt.Fprintf(os.Stderr, "rbg: unknown command %q\n\n%s", verb, cli.Usage())
 	os.Exit(2)
