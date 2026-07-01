@@ -60,6 +60,36 @@ func TestLocalRepoStatusNoUpstream(t *testing.T) {
 	}
 }
 
+func TestLocalRepoStatusAhead(t *testing.T) {
+	// Pins the left/right mapping: right column = ahead. A swapped mapping would
+	// otherwise pass the aligned(0\t0) and behind(4\t0) cases undetected.
+	r := &run.Recording{BySubstring: map[string]run.Result{
+		"status":    {Stdout: []byte(""), Code: 0},
+		"rev-parse": {Stdout: []byte("origin/main\n"), Code: 0},
+		"rev-list":  {Stdout: []byte("0\t3\n"), Code: 0}, // 0 behind, 3 ahead
+	}}
+	got, err := LocalRepo{R: r}.Status("/repo")
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got != core.Ahead {
+		t.Errorf("Status = %q, want ahead", got)
+	}
+}
+
+func TestLocalRepoStatusRevListMalformedErrors(t *testing.T) {
+	// Upstream exists but rev-list output is unparseable → error (not a silent
+	// misclassification).
+	r := &run.Recording{BySubstring: map[string]run.Result{
+		"status":    {Stdout: []byte(""), Code: 0},
+		"rev-parse": {Stdout: []byte("origin/main\n"), Code: 0},
+		"rev-list":  {Stdout: []byte("garbage-not-two-ints\n"), Code: 0},
+	}}
+	if _, err := (LocalRepo{R: r}).Status("/repo"); err == nil {
+		t.Errorf("expected error on unparseable rev-list output")
+	}
+}
+
 func TestLocalRepoStatusUsesGitDashCInDir(t *testing.T) {
 	r := &run.Recording{Default: run.Result{Stdout: []byte(""), Code: 0}}
 	_, _ = LocalRepo{R: r}.Status("/my/repo")
