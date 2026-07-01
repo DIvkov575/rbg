@@ -5,10 +5,14 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/divkov575/rbg/internal/core"
+	"github.com/divkov575/rbg/internal/host"
+	"github.com/divkov575/rbg/internal/render"
 )
 
 // Ops is the Engine surface the CLI drives. *engine.Engine satisfies it.
@@ -41,6 +45,10 @@ func Dispatch(args []string, ops Ops, out io.Writer) int {
 		return doName(rest, out, ops.Adopt)
 	case "kill":
 		return doName(rest, out, ops.Kill)
+	case "send":
+		return doSend(rest, ops, out)
+	case "read":
+		return doRead(rest, ops, out)
 	default:
 		fmt.Fprintf(out, "rbg: unknown command %q\n\n%s", verb, usage())
 		return 2
@@ -87,6 +95,40 @@ func doName(rest []string, out io.Writer, op func(string) error) int {
 		return 1
 	}
 	fmt.Fprintf(out, "ok: %s\n", rest[0])
+	return 0
+}
+
+// doSend delivers a follow-up task from `send <name> <task>`. A busy agent is
+// reported clearly (host.ErrBusy), distinct from other failures.
+func doSend(rest []string, ops Ops, out io.Writer) int {
+	if len(rest) != 2 {
+		fmt.Fprintf(out, "usage: rbg send <name> <task>\n")
+		return 2
+	}
+	if err := ops.Send(rest[0], rest[1]); err != nil {
+		if errors.Is(err, host.ErrBusy) {
+			fmt.Fprintf(out, "rbg: %q is busy — a send is already running\n", rest[0])
+			return 3
+		}
+		fmt.Fprintf(out, "rbg: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(out, "sent to %s\n", rest[0])
+	return 0
+}
+
+// doRead prints an agent's transcript, rendering the raw JSONL to human text.
+func doRead(rest []string, ops Ops, out io.Writer) int {
+	if len(rest) != 1 {
+		fmt.Fprintf(out, "usage: rbg read <name>\n")
+		return 2
+	}
+	data, err := ops.Read(rest[0])
+	if err != nil {
+		fmt.Fprintf(out, "rbg: %v\n", err)
+		return 1
+	}
+	render.Stream(strings.Split(string(data), "\n"), out)
 	return 0
 }
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/divkov575/rbg/internal/core"
+	"github.com/divkov575/rbg/internal/host"
 )
 
 // fakeOps is a canned Ops for dispatch tests, recording calls.
@@ -155,5 +156,54 @@ func TestDispatchNameVerbsRequireName(t *testing.T) {
 		if code := Dispatch([]string{v}, &fakeOps{}, &out); code != 2 {
 			t.Errorf("%s without a name should be usage error (2), got %d", v, code)
 		}
+	}
+}
+
+func TestDispatchSend(t *testing.T) {
+	var out bytes.Buffer
+	ops := &fakeOps{}
+	if code := Dispatch([]string{"send", "job", "next step"}, ops, &out); code != 0 {
+		t.Fatalf("send should succeed, got %d", code)
+	}
+	if ops.sent == nil || ops.sent[0] != "job" || ops.sent[1] != "next step" {
+		t.Errorf("Send called with %v", ops.sent)
+	}
+}
+
+func TestDispatchSendBusyIsClear(t *testing.T) {
+	var out bytes.Buffer
+	ops := &fakeOps{sendErr: host.ErrBusy}
+	code := Dispatch([]string{"send", "job", "x"}, ops, &out)
+	if code == 0 {
+		t.Errorf("busy send should be non-zero")
+	}
+	if !strings.Contains(strings.ToLower(out.String()), "busy") {
+		t.Errorf("busy message should mention busy: %q", out.String())
+	}
+}
+
+func TestDispatchSendWrongArgs(t *testing.T) {
+	var out bytes.Buffer
+	if code := Dispatch([]string{"send", "job"}, &fakeOps{}, &out); code != 2 {
+		t.Errorf("send needs <name> <task>, want usage error 2, got %d", code)
+	}
+}
+
+func TestDispatchRead(t *testing.T) {
+	var out bytes.Buffer
+	ops := &fakeOps{readData: []byte(`{"type":"user","message":{"role":"user","content":"hello there"}}` + "\n")}
+	if code := Dispatch([]string{"read", "job"}, ops, &out); code != 0 {
+		t.Fatalf("read should succeed, got %d", code)
+	}
+	if !strings.Contains(out.String(), "hello there") {
+		t.Errorf("read output should contain the rendered transcript text: %q", out.String())
+	}
+}
+
+func TestDispatchReadErrorIsExit1(t *testing.T) {
+	var out bytes.Buffer
+	ops := &fakeOps{readErr: errTest}
+	if code := Dispatch([]string{"read", "job"}, ops, &out); code != 1 {
+		t.Errorf("read engine error should exit 1, got %d", code)
 	}
 }
