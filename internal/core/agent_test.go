@@ -118,3 +118,37 @@ func TestDeriveSync(t *testing.T) {
 		}
 	}
 }
+
+func TestValidSessionID(t *testing.T) {
+	valid := []string{
+		"55a63641-2b5e-413e-bd07-00a74bbc1dfc",
+		"abc123",
+		"A-B-c-9",
+	}
+	for _, id := range valid {
+		if !ValidSessionID(id) {
+			t.Errorf("ValidSessionID(%q) = false, want true", id)
+		}
+	}
+	invalid := []string{
+		"",            // empty
+		"has space",   // space
+		"semi;colon",  // shell metachar
+		"glob*star",   // glob metachar
+		"dot.dot",     // path char
+		"slash/slash", // path separator
+		"tilde~home",  // tilde
+		"quote'quote", // single quote (shell breakout attempt)
+		"dollar$var",  // expansion
+		"-rf",         // leading dash (flag-injection into cat/ls)
+		"--all",       // leading double-dash
+		"back`tick",   // command substitution
+		"pipe|pipe",   // pipe
+		"amp&amp",     // background/chain
+	}
+	for _, id := range invalid {
+		if ValidSessionID(id) {
+			t.Errorf("ValidSessionID(%q) = true, want false", id)
+		}
+	}
+}
