@@ -112,6 +112,9 @@ func TestLocalRunnerLaunchGeneratesSessionAndSpawns(t *testing.T) {
 	if len(res.Session) != 36 {
 		t.Errorf("Session = %q, want a 36-char uuid", res.Session)
 	}
+	if res.Pid != 4321 {
+		t.Errorf("Pid = %d, want 4321 (the spawned pid)", res.Pid)
+	}
 	if len(sp.calls) != 1 {
 		t.Fatalf("made %d spawn calls, want 1", len(sp.calls))
 	}
@@ -122,7 +125,7 @@ func TestLocalRunnerLaunchGeneratesSessionAndSpawns(t *testing.T) {
 	if c.dir != "/home/me/app" {
 		t.Errorf("spawn dir = %q, want /home/me/app", c.dir)
 	}
-	// argv must carry the task, --session-id with the returned id, and -p.
+	// argv must carry the task, --session-id, and the returned session id.
 	j := joined(c.args)
 	if !contains(j, "fix the bug") || !contains(j, "--session-id") || !contains(j, res.Session) {
 		t.Errorf("spawn args missing task/session-id: %v", c.args)

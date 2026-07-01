@@ -20,12 +20,15 @@ import (
 // send (the desktop rbg-agent signals this with exit code 3).
 var ErrBusy = errors.New("agent busy: a send is already running")
 
-// RunResult is what a Launch produces: the resolved agent name and the claude
-// session id it was started with. The caller records these so Reconcile can
-// later match the record to the live session.
+// RunResult is what a Launch produces: the resolved agent name, the claude
+// session id it was started with, and (for a local launch) the child pid so the
+// caller can later stop it. The caller records Name+Session so Reconcile can
+// match the record to the live session. Pid is 0 for a remote launch (the
+// desktop rbg-agent tracks the pid on its side).
 type RunResult struct {
 	Name    string
 	Session string
+	Pid     int
 }
 
 // Runner launches, continues, and stops agents on one machine. LocalRunner acts
@@ -146,11 +149,11 @@ func (l LocalRunner) Launch(name, task string) (RunResult, error) {
 	}
 	session := core.NewSessionID()
 	args := append([]string{"claude"}, claudecli.LaunchHeadlessArgs(session, task)...)
-	_, err := l.spawnFn()(args[0], args[1:], l.logPath(session), l.Dir)
+	pid, err := l.spawnFn()(args[0], args[1:], l.logPath(session), l.Dir)
 	if err != nil {
 		return RunResult{}, fmt.Errorf("local launch spawn: %w", err)
 	}
-	return RunResult{Name: name, Session: session}, nil
+	return RunResult{Name: name, Session: session, Pid: pid}, nil
 }
 
 // Send continues a local claude session (identified by its session id) with a
