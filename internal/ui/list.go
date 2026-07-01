@@ -1,5 +1,10 @@
 package ui
 
+import (
+	"fmt"
+	"strings"
+)
+
 // listScreen is the base screen: the agent list under the current view lens,
 // with cursor navigation, ctrl-s view cycling, and per-agent action keys.
 type listScreen struct{}
@@ -71,9 +76,18 @@ func (s *listScreen) Hints() string {
 	return "j/k move · ctrl-s view · enter read · g run · s send · x kill · A adopt · n new · r refresh · q quit"
 }
 
-// View is implemented for real in Task 4 (views.go renderers); minimal here so
-// listScreen satisfies the Screen interface and this commit builds.
-func (s *listScreen) View(m *Model) string { return "" }
+// View renders the list screen: a header (view name + counts), the body (the
+// current lens), a status line, and the hints footer.
+func (s *listScreen) View(m *Model) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "rbg — %s view  (%d agents)\n\n", m.View, len(m.Agents))
+	b.WriteString(renderList(m))
+	if m.Status != "" {
+		fmt.Fprintf(&b, "\n%s\n", m.Status)
+	}
+	fmt.Fprintf(&b, "\n%s\n", s.Hints())
+	return b.String()
+}
 
 // moveCursor moves by delta and clamps to the current view's bounds.
 func (m *Model) moveCursor(delta int) {
