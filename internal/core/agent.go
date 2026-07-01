@@ -1,0 +1,69 @@
+// Package core is rbg's pure domain layer: one Agent type described by
+// orthogonal attributes (where it runs, how far along it is, whether rbg
+// started it, its code-sync state), a persisted record Store, a Reconcile
+// that merges records with live `claude agents` snapshots into one inventory,
+// and lenses (views) over that inventory. The package performs NO I/O beyond
+// reading/writing its own JSON store file, so it is fully unit-testable.
+package core
+
+// Location is which machine an agent runs on. The laptop is just one machine,
+// so local and remote delegation are the same operation with a different Where.
+type Location string
+
+const (
+	Local  Location = "local"
+	Remote Location = "remote"
+)
+
+// Lifecycle is how far along an agent is. Held is "prepared but not yet
+// launched" (the old queue/local-agent notion); a held agent always carries a
+// real Task — there are no blank placeholders.
+type Lifecycle string
+
+const (
+	Held    Lifecycle = "held"
+	Running Lifecycle = "running"
+	Done    Lifecycle = "done"
+)
+
+// Origin is whether rbg started the agent. Foreign agents are discovered live
+// on a machine but absent from rbg's records; adopting flips them to Managed.
+type Origin string
+
+const (
+	Managed Origin = "managed"
+	Foreign Origin = "foreign"
+)
+
+// Sync is the derived git state of an agent's repo/dir. Its value is filled by
+// a later layer; SyncUnknown means "not yet determined".
+type Sync string
+
+const (
+	SyncUnknown Sync = ""
+	Aligned     Sync = "aligned"
+	Ahead       Sync = "ahead"
+	Behind      Sync = "behind"
+	Dirty       Sync = "dirty"
+)
+
+// Agent is the single unit of delegated work. Local vs remote, held vs running
+// vs done, and managed vs foreign are all attributes here, not separate types.
+type Agent struct {
+	Name    string    `json:"name"`    // stable handle (map key in the Store)
+	Repo    string    `json:"repo"`    // git URL / identity; the grouping key
+	Dir     string    `json:"dir"`     // working directory on its host
+	Task    string    `json:"task"`    // the prompt (held agents still have one)
+	Session string    `json:"session"` // claude sessionId once run ("" = never)
+	Where   Location  `json:"where"`
+	State   Lifecycle `json:"state"`
+	Origin  Origin    `json:"origin"`
+	Sync    Sync      `json:"sync"`
+	RunAt   string    `json:"runAt"` // RFC3339 of last run ("" = never)
+}
+
+// IsHeld reports whether the agent is prepared but not yet launched.
+func (a Agent) IsHeld() bool { return a.State == Held }
+
+// IsForeign reports whether the agent was started outside rbg.
+func (a Agent) IsForeign() bool { return a.Origin == Foreign }
