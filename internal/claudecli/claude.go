@@ -39,3 +39,13 @@ func LaunchHeadlessArgs(sessionID, task string) []string {
 func ResumeHeadlessArgs(sessionID, task string) []string {
 	return []string{"-p", task, "--resume", sessionID, skipPerms}
 }
+
+// AgentsListArgs builds `claude agents --json --all`, the headless listing of
+// every background session on a host regardless of spawner (verified against
+// claude v2.1.197). --json prints a JSON array and exits without a TTY; --all
+// includes completed sessions, so rbg sees finished agents too. The result is
+// decoded into []core.Live by the host layer. No permission flag is needed:
+// listing runs no tools.
+func AgentsListArgs() []string {
+	return []string{"agents", "--json", "--all"}
+}
