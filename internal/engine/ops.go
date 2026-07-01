@@ -5,6 +5,7 @@ import (
 
 	"github.com/divkov575/rbg/internal/core"
 	"github.com/divkov575/rbg/internal/host"
+	"github.com/divkov575/rbg/internal/slug"
 )
 
 // List returns the reconciled inventory: rbg's stored records merged with the
@@ -25,9 +26,6 @@ func (e *Engine) List() ([]core.Agent, error) {
 // Run never launches with an empty dir. The returned agent is the persisted
 // record.
 func (e *Engine) Create(spec core.Agent) (core.Agent, error) {
-	if spec.Name == "" {
-		return core.Agent{}, fmt.Errorf("create: name is required")
-	}
 	if spec.Task == "" {
 		return core.Agent{}, fmt.Errorf("create: a task is required (no blank agents)")
 	}
@@ -39,7 +37,15 @@ func (e *Engine) Create(spec core.Agent) (core.Agent, error) {
 	default:
 		return core.Agent{}, fmt.Errorf("create: invalid location %q (want %q or %q)", spec.Where, core.Local, core.Remote)
 	}
-	if _, exists := e.store.Get(spec.Name); exists {
+	if spec.Name == "" {
+		// No name given: derive a readable slug from the task and dedup it, so the
+		// user never has to invent a name. An explicit name still wins.
+		base := slug.FromTask(spec.Task)
+		spec.Name = base
+		if _, taken := e.store.Get(base); taken {
+			spec.Name = e.freeName(base)
+		}
+	} else if _, exists := e.store.Get(spec.Name); exists {
 		return core.Agent{}, fmt.Errorf("create: agent %q already exists", spec.Name)
 	}
 	if spec.Repo != "" && spec.Dir == "" {

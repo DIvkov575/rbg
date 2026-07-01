@@ -98,68 +98,78 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
-func TestDispatchCreate(t *testing.T) {
+func TestDispatchCreateTaskOnly(t *testing.T) {
+	// One positional is the task; the name is auto-derived by the engine, so the
+	// spec carries no name and no repo.
 	var out, errOut bytes.Buffer
 	ops := &fakeOps{}
-	code := Dispatch([]string{"create", "later", "git@github:me/app", "refactor parser"}, ops, &out, &errOut)
+	code := Dispatch([]string{"create", "refactor parser"}, ops, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("create should succeed, got %d (%s)", code, errOut.String())
 	}
 	if ops.created == nil {
 		t.Fatalf("Create was not called")
 	}
-	if ops.created.Name != "later" || ops.created.Repo != "git@github:me/app" || ops.created.Task != "refactor parser" {
-		t.Errorf("create built wrong spec: %+v", *ops.created)
+	if ops.created.Task != "refactor parser" || ops.created.Repo != "" || ops.created.Name != "" {
+		t.Errorf("task-only create built wrong spec: %+v", *ops.created)
 	}
 }
 
-func TestDispatchCreateDefaultsToLocalWhere(t *testing.T) {
-	// The 3-arg form leaves Where unset, which the engine defaults to local.
+func TestDispatchCreateRepoAndTask(t *testing.T) {
+	// Two positionals are <repo> <task>.
 	var out, errOut bytes.Buffer
 	ops := &fakeOps{}
-	Dispatch([]string{"create", "later", "repo", "task"}, ops, &out, &errOut)
-	if ops.created == nil {
-		t.Fatalf("Create not called")
+	code := Dispatch([]string{"create", "git@github:me/app", "refactor parser"}, ops, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("create should succeed, got %d (%s)", code, errOut.String())
 	}
-	if ops.created.Where != "" {
-		t.Errorf("3-arg create should leave Where unset (engine defaults it), got %q", ops.created.Where)
+	if ops.created == nil || ops.created.Repo != "git@github:me/app" || ops.created.Task != "refactor parser" {
+		t.Errorf("repo+task create built wrong spec: %+v", ops.created)
 	}
 }
 
 func TestDispatchCreateRemoteFlag(t *testing.T) {
 	var out, errOut bytes.Buffer
 	ops := &fakeOps{}
-	code := Dispatch([]string{"create", "--remote", "job", "repo", "task"}, ops, &out, &errOut)
+	code := Dispatch([]string{"create", "--remote", "repo", "task"}, ops, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("create --remote should succeed, got %d (%s)", code, errOut.String())
 	}
 	if ops.created == nil || ops.created.Where != core.Remote {
 		t.Errorf("--remote should set Where=remote, got %+v", ops.created)
 	}
-	if ops.created.Name != "job" {
-		t.Errorf("flag consumed the wrong arg: name=%q", ops.created.Name)
+	if ops.created.Repo != "repo" || ops.created.Task != "task" {
+		t.Errorf("flag consumed the wrong positionals: %+v", ops.created)
 	}
 }
 
-func TestDispatchCreateLocalFlag(t *testing.T) {
+func TestDispatchCreateLocalFlagTaskOnly(t *testing.T) {
 	var out, errOut bytes.Buffer
 	ops := &fakeOps{}
-	code := Dispatch([]string{"create", "--local", "job", "repo", "task"}, ops, &out, &errOut)
+	code := Dispatch([]string{"create", "--local", "just a task"}, ops, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("create --local should succeed, got %d", code)
 	}
 	if ops.created == nil || ops.created.Where != core.Local {
 		t.Errorf("--local should set Where=local, got %+v", ops.created)
 	}
+	if ops.created.Task != "just a task" {
+		t.Errorf("--local task-only should carry the task, got %+v", ops.created)
+	}
 }
 
 func TestDispatchCreateWrongArgs(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := Dispatch([]string{"create", "onlyname"}, &fakeOps{}, &out, &errOut); code != 2 {
-		t.Errorf("create with too few args should be usage error (2), got %d", code)
+	// zero positionals (only the flag) → usage error
+	if code := Dispatch([]string{"create", "--remote"}, &fakeOps{}, &out, &errOut); code != 2 {
+		t.Errorf("create with no task should be usage error (2), got %d", code)
 	}
 	if errOut.Len() == 0 {
 		t.Errorf("usage error should print to errOut")
+	}
+	// three positionals → usage error
+	if code := Dispatch([]string{"create", "a", "b", "c"}, &fakeOps{}, &out, &errOut); code != 2 {
+		t.Errorf("create with too many args should be usage error (2), got %d", code)
 	}
 }
 
