@@ -54,6 +54,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeList
 		}
 		return m, nil
+	case modePicker:
+		return m.keyPicker(s, r)
 	default:
 		return m.keyList(s, r)
 	}
@@ -112,9 +114,26 @@ func (m Model) keyListRune(r rune) (tea.Model, tea.Cmd) {
 			m.input = newSendInput(a.Name)
 			m.mode = modeInput
 		}
-	case 'n': // new: compose a create
-		m.input = newCreateInput()
+	case 'n': // new: pick a project first, then compose the task
+		m.picker = newPicker(m.ops.Projects())
+		m.mode = modePicker
+	}
+	return m, nil
+}
+
+// keyPicker handles keys in the project picker. On a choice it stores the repo
+// and advances to the task prompt; Esc cancels the create flow.
+func (m Model) keyPicker(s string, r rune) (tea.Model, tea.Cmd) {
+	pk, done, result := m.picker.key(s, r)
+	m.picker = pk
+	if !done {
+		return m, nil
+	}
+	if res, ok := result.(pickerDone); ok {
+		m.input = newCreateInput(res.repo) // repo chosen; now collect the task
 		m.mode = modeInput
+	} else {
+		m.mode = modeList // cancelled
 	}
 	return m, nil
 }

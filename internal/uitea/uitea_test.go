@@ -11,6 +11,7 @@ import (
 // recOps records calls and returns canned data.
 type recOps struct {
 	agents   []core.Agent
+	projects []core.Project
 	ran      string
 	killed   string
 	adopted  string
@@ -27,6 +28,7 @@ func (o *recOps) Send(n, t string) error                  { o.sent = [2]string{n
 func (o *recOps) Read(n string) ([]byte, error)           { o.readName = n; return o.readData, nil }
 func (o *recOps) Kill(n string) error                     { o.killed = n; return nil }
 func (o *recOps) Adopt(n string) error                    { o.adopted = n; return nil }
+func (o *recOps) Projects() []core.Project                { return o.projects }
 
 func remote(name string) core.Agent {
 	return core.Agent{Name: name, Where: core.Remote, State: core.Running, Origin: core.Managed}
@@ -116,36 +118,42 @@ func TestEnterReadsTranscriptAndOpensPager(t *testing.T) {
 	}
 }
 
-func TestCreateFlowCollectsRepoThenTask(t *testing.T) {
-	// The name is auto-derived by the engine, so the flow only asks repo → task.
-	o := &recOps{}
+func enterKey(m Model) (Model, tea.Cmd) {
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	return mm.(Model), cmd
+}
+
+func typeStr(m Model, s string) Model {
+	for _, r := range s {
+		m, _ = stepRune(m, r)
+	}
+	return m
+}
+
+func TestCreateFlowPicksProjectThenTask(t *testing.T) {
+	// n opens the project picker; choosing a project then asks for the task; the
+	// engine auto-derives the name. Picker index 0 is "(no repo)", index 1 is the
+	// first suggestion.
+	o := &recOps{projects: []core.Project{{Label: "app (local)", Repo: "/w/app", Origin: "local"}}}
 	m := loaded(o)
-	m, _ = stepRune(m, 'n') // open create
+	m, _ = stepRune(m, 'n')
+	if m.mode != modePicker {
+		t.Fatalf("n should open the project picker, mode=%d", m.mode)
+	}
+	// move to the first real suggestion (index 1) and choose it
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mm.(Model)
+	m, _ = enterKey(m)
 	if m.mode != modeInput {
-		t.Fatal("n should open the input overlay")
+		t.Fatalf("choosing a project should advance to the task input, mode=%d", m.mode)
 	}
-	if m.input.stage != stageRepo {
-		t.Fatalf("create should start on the repo stage, got %d", m.input.stage)
-	}
-	typeStr := func(m Model, s string) Model {
-		for _, r := range s {
-			m, _ = stepRune(m, r)
-		}
-		return m
-	}
-	enter := func(m Model) (Model, tea.Cmd) {
-		mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		return mm.(Model), cmd
-	}
-	m = typeStr(m, "app")
-	m, _ = enter(m) // repo → task stage
 	m = typeStr(m, "do the thing")
-	m, cmd := enter(m) // task → submit
+	m, cmd := enterKey(m)
 	if cmd == nil {
 		t.Fatal("final enter should dispatch a create command")
 	}
 	cmd()
-	if o.created.Repo != "app" || o.created.Task != "do the thing" {
+	if o.created.Repo != "/w/app" || o.created.Task != "do the thing" {
 		t.Errorf("created spec wrong: %+v", o.created)
 	}
 	if o.created.Name != "" {
@@ -156,47 +164,79 @@ func TestCreateFlowCollectsRepoThenTask(t *testing.T) {
 	}
 }
 
-func TestCreateEmptyRepoAdvancesToTask(t *testing.T) {
-	// Repo is optional: pressing enter on a blank repo advances to the task stage.
-	o := &recOps{}
+func TestCreateNoRepoOption(t *testing.T) {
+	// Choosing the first picker entry ("no repo") yields a repo-less create.
+	o := &recOps{projects: []core.Project{{Label: "app (local)", Repo: "/w/app"}}}
 	m := loaded(o)
 	m, _ = stepRune(m, 'n')
-	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // empty repo
-	m = mm.(Model)
-	if cmd != nil {
-		t.Error("empty repo should not dispatch, just advance")
+	m, _ = enterKey(m) // cursor at 0 = "(no repo)"
+	if m.mode != modeInput {
+		t.Fatalf("no-repo choice should advance to the task input, mode=%d", m.mode)
 	}
-	if m.mode != modeInput || m.input.stage != stageTask {
-		t.Errorf("empty repo should advance to the task stage, got mode=%d stage=%d", m.mode, m.input.stage)
+	m = typeStr(m, "just a task")
+	m, cmd := enterKey(m)
+	cmd()
+	if o.created.Repo != "" || o.created.Task != "just a task" {
+		t.Errorf("no-repo create wrong: %+v", o.created)
+	}
+}
+
+func TestPickerFilters(t *testing.T) {
+	o := &recOps{projects: []core.Project{
+		{Label: "alpha (local)", Repo: "/w/alpha"},
+		{Label: "beta (github)", Repo: "me/beta"},
+	}}
+	m := loaded(o)
+	m, _ = stepRune(m, 'n')
+	m = typeStr(m, "beta") // filter
+	matches := m.picker.matches()
+	// "(no repo)" always matches + "beta" → 2
+	if len(matches) != 2 {
+		t.Fatalf("filter 'beta' should match no-repo + beta, got %d: %+v", len(matches), matches)
+	}
+	m, _ = enterKey(m) // cursor 0 = no-repo (still first); choose beta explicitly
+	// after filtering, choose the beta row: move down then enter
+	// (re-open to test choosing the filtered suggestion)
+	m2 := loaded(o)
+	m2, _ = stepRune(m2, 'n')
+	m2 = typeStr(m2, "beta")
+	mm, _ := m2.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m2 = mm.(Model)
+	m2, _ = enterKey(m2)
+	m2 = typeStr(m2, "t")
+	_, cmd := enterKey(m2)
+	cmd()
+	if o.created.Repo != "me/beta" {
+		t.Errorf("filtered choice should pick me/beta, got %q", o.created.Repo)
 	}
 }
 
 func TestCreateEmptyTaskStays(t *testing.T) {
 	o := &recOps{}
 	m := loaded(o)
-	m, _ = stepRune(m, 'n')
-	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // blank repo → task stage
-	m = mm.(Model)
-	mm2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // empty task
-	m = mm2.(Model)
+	m, _ = stepRune(m, 'n')     // picker
+	m, _ = enterKey(m)          // choose no-repo → task input
+	mm, cmd := enterKey(m)      // empty task
+	m = mm
 	if cmd != nil {
 		t.Error("empty task should not dispatch")
 	}
-	if m.mode != modeInput || m.input.stage != stageTask {
-		t.Errorf("empty task should stay on the task stage")
+	if m.mode != modeInput {
+		t.Errorf("empty task should stay on the task input, mode=%d", m.mode)
 	}
 }
 
 func TestTabCyclesLens(t *testing.T) {
 	o := &recOps{agents: []core.Agent{remote("a")}}
 	m := loaded(o)
-	if m.view != viewRemote {
-		t.Fatalf("initial view = %v", m.view)
+	// Default is combined (so local + remote agents are visible on open).
+	if m.view != viewCombined {
+		t.Fatalf("initial view = %v, want combined", m.view)
 	}
 	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = mm.(Model)
-	if m.view != viewLocal {
-		t.Errorf("tab should advance to local, got %v", m.view)
+	if m.view != viewProject {
+		t.Errorf("tab from combined should advance to project, got %v", m.view)
 	}
 }
 

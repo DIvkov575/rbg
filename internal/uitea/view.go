@@ -39,6 +39,8 @@ func (m Model) View() string {
 		return m.viewInput()
 	case modePager:
 		return m.viewPager()
+	case modePicker:
+		return m.viewPicker()
 	default:
 		return m.viewList()
 	}
@@ -189,6 +191,44 @@ func (m Model) viewInput() string {
 	body := fmt.Sprintf("%s\n\n> %s", stSection.Render(m.input.prompt()), m.input.buf)
 	box := stBox.Width(clamp(m.contentWidth()-4, 30, 80)).Render(body)
 	return box + "\n" + stHints.Render("type · enter next/submit · esc cancel")
+}
+
+// viewPicker renders the project chooser: a filter line and a scrollable list
+// of matching projects, the selected one highlighted, origin-colored.
+func (m Model) viewPicker() string {
+	var b strings.Builder
+	b.WriteString(stTitle.Render("Pick a project for the new agent") + "\n")
+	b.WriteString(stHints.Render("filter: "+m.picker.filter+"▏") + "\n\n")
+
+	matches := m.picker.matches()
+	// Window the list to the terminal height so long lists scroll around the cursor.
+	win := m.h - 6
+	if win < 3 {
+		win = 3
+	}
+	start := 0
+	if m.picker.cursor >= win {
+		start = m.picker.cursor - win + 1
+	}
+	end := start + win
+	if end > len(matches) {
+		end = len(matches)
+	}
+	for i := start; i < end; i++ {
+		p := matches[i]
+		line := "  " + p.Label
+		if i == m.picker.cursor {
+			line = stSelected.Render("▸ " + p.Label)
+		} else {
+			line = stRow.Render(line)
+		}
+		b.WriteString(line + "\n")
+	}
+	if len(matches) == 0 {
+		b.WriteString(stHints.Render("  (no matches)") + "\n")
+	}
+	b.WriteString("\n" + stHints.Render("type to filter · ↑/↓ move · enter choose · esc cancel"))
+	return b.String()
 }
 
 // viewPager renders the transcript.

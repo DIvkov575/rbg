@@ -51,8 +51,12 @@ func TestNewWiresRealHostImpls(t *testing.T) {
 	if _, ok := e.remote.Source.(host.RemoteSource); !ok {
 		t.Errorf("remote.Source = %T, want host.RemoteSource", e.remote.Source)
 	}
-	if _, ok := e.remote.Tx.(host.RemoteTranscripts); !ok {
-		t.Errorf("remote.Tx = %T, want host.RemoteTranscripts", e.remote.Tx)
+	// Remote transcripts are wrapped in a local cache; the inner reader is remote.
+	ct, ok := e.remote.Tx.(host.CachingTranscripts)
+	if !ok {
+		t.Errorf("remote.Tx = %T, want host.CachingTranscripts", e.remote.Tx)
+	} else if _, ok := ct.Inner.(host.RemoteTranscripts); !ok {
+		t.Errorf("remote.Tx.Inner = %T, want host.RemoteTranscripts", ct.Inner)
 	}
 	if _, ok := e.local.Repo.(host.LocalRepo); !ok {
 		t.Errorf("local.Repo = %T, want host.LocalRepo", e.local.Repo)

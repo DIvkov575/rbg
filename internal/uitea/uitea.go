@@ -21,15 +21,17 @@ type Ops interface {
 	Read(name string) ([]byte, error)
 	Kill(name string) error
 	Adopt(name string) error
+	Projects() []core.Project
 }
 
 // mode is which screen the model is showing.
 type mode int
 
 const (
-	modeList  mode = iota // the agents list
-	modeInput             // composing a create or send
-	modePager             // reading a transcript
+	modeList   mode = iota // the agents list
+	modeInput              // composing a create or send (task text)
+	modePager              // reading a transcript
+	modePicker             // choosing a project for a new agent
 )
 
 // --- messages (results of async engine work) ---
@@ -61,13 +63,17 @@ type Model struct {
 	status string
 	mode   mode
 
-	input inputModel
-	pager pagerModel
+	input  inputModel
+	pager  pagerModel
+	picker pickerModel
 }
 
 // New builds a dashboard model over ops.
 func New(ops Ops) Model {
-	return Model{ops: ops, view: viewRemote}
+	// Default to the combined lens: most agents (and every newly-created managed
+	// one) live locally, so defaulting to the remote-only lens hid them and made
+	// the dashboard look empty. Combined shows both machines at once.
+	return Model{ops: ops, view: viewCombined}
 }
 
 // Init kicks off the first inventory load.

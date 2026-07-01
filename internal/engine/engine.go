@@ -38,6 +38,7 @@ type Engine struct {
 	remote    machine
 	killLocal func(pid int) error
 	now       func() string
+	projects  func() []core.Project // suggested targets for a new agent (injectable)
 }
 
 // New builds an Engine: it loads (or initializes) the store at storePath and
@@ -60,7 +61,7 @@ func New(cfg *config.Config, r run.Runner, storePath, home string) (*Engine, err
 	if remoteHome != "" {
 		remoteBase = filepath.Join(remoteHome, "workplace")
 	}
-	return &Engine{
+	e := &Engine{
 		store: store,
 		local: machine{
 			Source:    host.LocalSource{R: r},
@@ -71,8 +72,11 @@ func New(cfg *config.Config, r run.Runner, storePath, home string) (*Engine, err
 			home:      home,
 		},
 		remote: machine{
-			Source:    host.RemoteSource{C: cfg, R: r},
-			Tx:        host.RemoteTranscripts{C: cfg, R: r},
+			Source: host.RemoteSource{C: cfg, R: r},
+			// Cache remote transcripts under the laptop's ~/.rbg/transcripts so a
+			// remote conversation stays readable offline and repeat reads don't
+			// re-SSH. home is the LAPTOP home (where the cache lives), not remoteHome.
+			Tx:        host.CachingTranscripts{Inner: host.RemoteTranscripts{C: cfg, R: r}, Home: home},
 			Repo:      host.RemoteRepo{C: cfg, R: r},
 			newRunner: func(dir string) host.Runner { return host.RemoteRunner{C: cfg, R: r, Dir: dir} },
 			base:      remoteBase,
@@ -80,7 +84,21 @@ func New(cfg *config.Config, r run.Runner, storePath, home string) (*Engine, err
 		},
 		killLocal: host.KillProcessGroup,
 		now:       func() string { return time.Now().UTC().Format(time.RFC3339) },
-	}, nil
+	}
+	// Suggest new-agent targets from four sources, most-actionable first (local
+	// checkouts win a dedup tie, then remote, then GitHub, then in-use repos).
+	// Each source degrades to nil independently, so a missing gh or unreachable
+	// desktop just yields fewer suggestions.
+	e.projects = func() []core.Project {
+		agents, _ := e.List()
+		return core.MergeProjects(
+			host.LocalProjects(r, localBase),
+			host.RemoteProjects(cfg, r, remoteBase),
+			host.GithubProjects(r),
+			host.ProjectsFromAgents(agents),
+		)
+	}
+	return e, nil
 }
 
 // pick returns the capability bundle for a location — the laptop is just

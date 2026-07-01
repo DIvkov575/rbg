@@ -10,33 +10,22 @@ import (
 type inputKind int
 
 const (
-	inputCreate inputKind = iota // name → repo → task, then Create
-	inputSend                    // single task, then Send to target
+	inputCreate inputKind = iota // task for a new agent (repo already chosen)
+	inputSend                    // follow-up task for a running agent
 )
 
-// inputStage tracks which create field is being entered. Names are auto-derived
-// by the engine from the task, so the create flow only collects repo then task.
-type inputStage int
-
-const (
-	stageRepo inputStage = iota
-	stageTask
-)
-
-// inputModel is the text-entry overlay. For create it walks name→repo→task; for
-// send it collects one task for the target agent.
+// inputModel is the single-line task-entry overlay. For create the repo was
+// already chosen in the picker and is carried here; for send the target agent
+// is carried. Both collect one task string.
 type inputModel struct {
 	kind   inputKind
 	target string // agent name (send)
-	stage  inputStage
-	repo   string // committed create field
+	repo   string // chosen repo (create)
 	buf    string
 }
 
-func newCreateInput() inputModel { return inputModel{kind: inputCreate, stage: stageRepo} }
-func newSendInput(target string) inputModel {
-	return inputModel{kind: inputSend, target: target}
-}
+func newCreateInput(repo string) inputModel { return inputModel{kind: inputCreate, repo: repo} }
+func newSendInput(target string) inputModel { return inputModel{kind: inputSend, target: target} }
 
 // createDone is returned when the create flow finishes, carrying the spec.
 type createDone struct{ spec core.Agent }
@@ -46,10 +35,9 @@ type sendDone struct {
 	target, task string
 }
 
-// key handles one keystroke. It returns the updated input, and one of:
-//   - done=false: still editing (stay in input mode)
-//   - done=true, result=createDone/sendDone: submit
-//   - done=true, result=nil: cancelled (Esc)
+// key handles one keystroke. Returns updated input, done, and (on done) a
+// createDone/sendDone, or nil on cancel (Esc). An empty task keeps the overlay
+// open (task is required).
 func (in inputModel) key(s string, r rune) (inputModel, bool, any) {
 	switch s {
 	case "esc":
@@ -60,7 +48,15 @@ func (in inputModel) key(s string, r rune) (inputModel, bool, any) {
 		}
 		return in, false, nil
 	case "enter":
-		return in.submit()
+		task := strings.TrimSpace(in.buf)
+		if task == "" {
+			return in, false, nil // task required; stay
+		}
+		if in.kind == inputSend {
+			return in, true, sendDone{target: in.target, task: task}
+		}
+		// name is auto-derived by the engine from the task.
+		return in, true, createDone{spec: core.Agent{Repo: in.repo, Task: task}}
 	case "rune":
 		in.buf += string(r)
 		return in, false, nil
@@ -68,39 +64,13 @@ func (in inputModel) key(s string, r rune) (inputModel, bool, any) {
 	return in, false, nil
 }
 
-func (in inputModel) submit() (inputModel, bool, any) {
-	val := strings.TrimSpace(in.buf)
-	if in.kind == inputSend {
-		if val == "" {
-			return in, false, nil // task required; stay
-		}
-		return in, true, sendDone{target: in.target, task: val}
-	}
-	// create: repo(optional) → task. The name is auto-derived from the task by
-	// the engine, so it isn't collected here.
-	switch in.stage {
-	case stageRepo:
-		in.repo = val // optional
-		in.buf = ""
-		in.stage = stageTask
-		return in, false, nil
-	default: // stageTask
-		if val == "" {
-			return in, false, nil // task required; stay
-		}
-		return in, true, createDone{spec: core.Agent{Repo: in.repo, Task: val}}
-	}
-}
-
-// prompt is the label for the current field.
+// prompt is the label for the input overlay.
 func (in inputModel) prompt() string {
 	if in.kind == inputSend {
 		return "Follow-up to " + in.target
 	}
-	switch in.stage {
-	case stageRepo:
-		return "New agent · repo, blank for none (1/2)"
-	default:
-		return "New agent · task (2/2)"
+	if in.repo == "" {
+		return "New agent · task (no repo)"
 	}
+	return "New agent · task · " + in.repo
 }

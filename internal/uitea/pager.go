@@ -1,6 +1,10 @@
 package uitea
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/divkov575/rbg/internal/render"
+)
 
 // pagerModel is a read-only, scrollable transcript view.
 type pagerModel struct {
@@ -9,9 +13,22 @@ type pagerModel struct {
 	offset int
 }
 
+// newPager renders raw claude transcript JSONL into readable conversation lines
+// ("role: text") via render.Line, rather than dumping the raw JSON. Each
+// rendered turn may span multiple display lines (its own text is split on \n),
+// so long turns still scroll naturally. If nothing renders (e.g. an empty or
+// tool-only transcript) it falls back to a placeholder rather than a blank pane.
 func newPager(title string, data []byte) pagerModel {
 	norm := strings.ReplaceAll(string(data), "\r\n", "\n")
-	lines := strings.Split(strings.TrimRight(norm, "\n"), "\n")
+	var lines []string
+	for _, raw := range strings.Split(norm, "\n") {
+		if out, ok := render.Line(raw); ok {
+			lines = append(lines, strings.Split(out, "\n")...)
+		}
+	}
+	if len(lines) == 0 {
+		lines = []string{"(no conversation content yet)"}
+	}
 	return pagerModel{title: title, lines: lines}
 }
 
