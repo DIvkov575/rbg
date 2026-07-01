@@ -1,5 +1,8 @@
 # HLD: rbg Unified Architecture — Agents, Views, Sync (`rbg-unified`)
 
+> **Superseded by `HLD-rbg-clean-architecture.md`** (greenfield redesign) as the forward plan; kept for history.
+
+
 **Date:** 2026-06-30 · **Author:** divkov · **Status:** Design
 **Consolidates & supersedes (as the forward plan):**
 `HLD-tui-screen-entry-refactor.md`, `HLD-project-view-sync-discovery.md`,
