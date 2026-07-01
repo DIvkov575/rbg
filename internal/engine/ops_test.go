@@ -110,3 +110,46 @@ func TestCreateRejectsDuplicateName(t *testing.T) {
 		t.Errorf("duplicate name should error")
 	}
 }
+
+func TestReadDispatchesToAgentsMachine(t *testing.T) {
+	var localAsked, remoteAsked string
+	e := newTestEngine(t,
+		machine{
+			Source: fakeSource{live: []core.Live{{SessionID: "L1", Name: "loc", Cwd: "/x", State: "working"}}},
+			Tx:     fakeTx{data: []byte("local transcript"), gotSession: &localAsked},
+		},
+		machine{
+			Source: fakeSource{live: []core.Live{{SessionID: "R1", Name: "rem", Cwd: "/y", State: "done"}}},
+			Tx:     fakeTx{data: []byte("remote transcript"), gotSession: &remoteAsked},
+		},
+	)
+
+	data, err := e.Read("rem")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if string(data) != "remote transcript" {
+		t.Errorf("Read = %q, want the remote transcript", data)
+	}
+	if remoteAsked != "R1" {
+		t.Errorf("remote Tx asked for session %q, want R1", remoteAsked)
+	}
+	if localAsked != "" {
+		t.Errorf("local Tx should not have been asked, got %q", localAsked)
+	}
+}
+
+func TestReadUnknownAgentErrors(t *testing.T) {
+	e := newTestEngine(t, machine{Source: fakeSource{}}, machine{Source: fakeSource{}})
+	if _, err := e.Read("ghost"); err == nil {
+		t.Errorf("reading an unknown agent should error")
+	}
+}
+
+func TestReadAgentWithoutSessionErrors(t *testing.T) {
+	e := newTestEngine(t, machine{Source: fakeSource{}}, machine{Source: fakeSource{}})
+	e.store.Add(core.Agent{Name: "held", Task: "t", State: core.Held, Origin: core.Managed})
+	if _, err := e.Read("held"); err == nil {
+		t.Errorf("reading a never-run agent should error")
+	}
+}

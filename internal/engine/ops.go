@@ -37,3 +37,34 @@ func (e *Engine) Create(spec core.Agent) (core.Agent, error) {
 	}
 	return spec, nil
 }
+
+// find returns the named agent from the reconciled inventory, so callers resolve
+// against live reality (including foreign agents), not just stored records.
+func (e *Engine) find(name string) (core.Agent, error) {
+	agents, err := e.List()
+	// Note: err may be a degradation error; the inventory is still usable, so we
+	// search it and only surface err if the agent isn't found.
+	for _, a := range agents {
+		if a.Name == name {
+			return a, nil
+		}
+	}
+	if err != nil {
+		return core.Agent{}, fmt.Errorf("agent %q not found (inventory degraded: %w)", name, err)
+	}
+	return core.Agent{}, fmt.Errorf("agent %q not found", name)
+}
+
+// Read returns an agent's raw transcript bytes (HLD F8), read from whichever
+// machine the agent lives on. An agent that has never run (no session) has no
+// transcript.
+func (e *Engine) Read(name string) ([]byte, error) {
+	a, err := e.find(name)
+	if err != nil {
+		return nil, err
+	}
+	if a.Session == "" {
+		return nil, fmt.Errorf("agent %q has not run yet (no transcript)", name)
+	}
+	return e.pick(a.Where).Tx.Read(a.Session)
+}
