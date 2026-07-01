@@ -46,10 +46,16 @@ func (e *Engine) Run(name string) error {
 	// desktop rbg-agent dedups a colliding name (foo → foo-2), so if we kept our
 	// original name, later Send/Kill (which key the remote agent by name) would
 	// target an id the desktop doesn't have. Adopt the resolved name, re-keying
-	// the store record when it changed.
+	// the store record when it changed — but never over a DIFFERENT existing
+	// record (that would orphan its running child); in that unlikely case keep
+	// our own name and record the live session under it, which still resolves
+	// Send/Kill correctly for a local agent (by session) and is the safest
+	// outcome for a remote one.
 	if res.Name != "" && res.Name != rec.Name {
-		e.store.Delete(rec.Name)
-		rec.Name = res.Name
+		if _, taken := e.store.Get(res.Name); !taken {
+			e.store.Delete(rec.Name)
+			rec.Name = res.Name
+		}
 	}
 	rec.Session = res.Session
 	rec.Pid = res.Pid

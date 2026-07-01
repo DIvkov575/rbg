@@ -177,6 +177,34 @@ func TestRunAdoptsResolvedNameFromLaunch(t *testing.T) {
 	}
 }
 
+func TestRunDoesNotClobberDifferentRecordOnNameCollision(t *testing.T) {
+	// The launch resolves to "job-2", but a DIFFERENT managed record already owns
+	// that name. Re-keying must not overwrite it (which would orphan its child);
+	// the launched agent keeps its own name with the new session recorded.
+	rem := machine{
+		Source:    fakeSource{},
+		Repo:      fakeRepo{},
+		newRunner: runnerFactory(fakeRunner{res: host.RunResult{Name: "job-2", Session: "NEW"}}),
+	}
+	e := newTestEngine(t, machine{Source: fakeSource{}}, rem)
+	e.store.Add(core.Agent{Name: "job-2", Session: "EXISTING", Pid: 777, Where: core.Remote, State: core.Running, Origin: core.Managed, Task: "other"})
+	e.store.Add(core.Agent{Name: "job", Task: "t", Where: core.Remote, State: core.Held, Origin: core.Managed})
+
+	if err := e.Run("job"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// The pre-existing job-2 must be untouched.
+	other, ok := e.store.Get("job-2")
+	if !ok || other.Session != "EXISTING" || other.Pid != 777 {
+		t.Errorf("pre-existing job-2 was clobbered: %+v ok=%v", other, ok)
+	}
+	// The launched agent kept its own name with the new session.
+	launched, ok := e.store.Get("job")
+	if !ok || launched.Session != "NEW" {
+		t.Errorf("launched agent should keep name 'job' with the new session: %+v ok=%v", launched, ok)
+	}
+}
+
 func TestRunAbortsOnSyncFailure(t *testing.T) {
 	var launched string
 	rem := machine{
