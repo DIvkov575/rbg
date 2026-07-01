@@ -77,9 +77,19 @@ type Model struct {
 	stack  []Screen
 }
 
-// NewModel builds a model over the given inventory (no screens pushed yet).
+// NewModel builds a model over the given inventory and pushes the base list
+// screen, so the loop always has a Top() to drive.
 func NewModel(agents []core.Agent) *Model {
-	return &Model{Agents: agents, View: ViewRemote}
+	m := &Model{Agents: agents, View: ViewRemote}
+	m.push(&listScreen{})
+	return m
+}
+
+// SetAgents replaces the inventory (e.g. after a refresh) and re-clamps the
+// cursor to the new visible bounds.
+func (m *Model) SetAgents(agents []core.Agent) {
+	m.Agents = agents
+	m.clampCursor()
 }
 
 // Top returns the current (top-of-stack) screen, or nil if the stack is empty

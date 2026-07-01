@@ -1,17 +1,17 @@
-//go:build darwin
+//go:build linux
 
-package tui
+package ui
 
 import (
 	"syscall"
 	"unsafe"
 )
 
-// rawMode puts fd into raw mode and returns a restore func. Darwin uses
-// TIOCGETA/TIOCSETA for the termios get/set ioctls.
+// rawMode puts fd into raw mode and returns a restore func. Linux uses
+// TCGETS/TCSETS for the termios get/set ioctls.
 func rawMode(fd uintptr) (func(), error) {
 	var old syscall.Termios
-	if err := ioctl(fd, syscall.TIOCGETA, &old); err != nil {
+	if err := ioctl(fd, syscall.TCGETS, &old); err != nil {
 		return nil, err
 	}
 	raw := old
@@ -19,10 +19,10 @@ func rawMode(fd uintptr) (func(), error) {
 	raw.Iflag &^= syscall.IXON | syscall.ICRNL | syscall.BRKINT | syscall.INPCK | syscall.ISTRIP
 	raw.Cc[syscall.VMIN] = 1
 	raw.Cc[syscall.VTIME] = 0
-	if err := ioctl(fd, syscall.TIOCSETA, &raw); err != nil {
+	if err := ioctl(fd, syscall.TCSETS, &raw); err != nil {
 		return nil, err
 	}
-	return func() { _ = ioctl(fd, syscall.TIOCSETA, &old) }, nil
+	return func() { _ = ioctl(fd, syscall.TCSETS, &old) }, nil
 }
 
 func ioctl(fd, req uintptr, t *syscall.Termios) error {
