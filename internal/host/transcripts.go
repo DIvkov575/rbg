@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/divkov575/rbg/internal/config"
 	"github.com/divkov575/rbg/internal/core"
+	"github.com/divkov575/rbg/internal/run"
+	"github.com/divkov575/rbg/internal/sshx"
 )
 
 // Transcripts reads an agent's raw .jsonl conversation transcript from one
@@ -62,3 +65,35 @@ func SaveMirror(home, session string, data []byte) (string, error) {
 }
 
 var _ Transcripts = LocalTranscripts{}
+
+// RemoteTranscripts reads transcripts from the desktop over SSH. It runs
+// `sh -c 'cat <glob>'` so the DESKTOP shell expands the session-id glob (the
+// cwd-slug dir is unknown to the laptop). The session id is validated before it
+// is placed into that command string, which is the shell-injection defense.
+type RemoteTranscripts struct {
+	C *config.Config
+	R run.Runner
+}
+
+// Read cats the desktop transcript for the session and returns its bytes.
+func (s RemoteTranscripts) Read(session string) ([]byte, error) {
+	if !core.ValidSessionID(session) {
+		return nil, fmt.Errorf("invalid session id %q", session)
+	}
+	// The glob uses ~ so the desktop shell resolves the remote home. sshx quotes
+	// each remote token, so the login shell hands `sh -c` this exact command and
+	// the inner sh expands the glob. session is guarded above, so it is inert.
+	catCmd := "cat ~/.claude/projects/*/" + session + ".jsonl"
+	remote := []string{"sh", "-c", catCmd}
+	sshArgs := sshx.BuildSSHArgs(s.C, remote, sshx.Options{ConnectTimeout: true})
+	out, code, err := s.R.Run("ssh", sshArgs, nil)
+	if err != nil {
+		return nil, fmt.Errorf("remote transcript read: %w", err)
+	}
+	if code != 0 {
+		return nil, fmt.Errorf("remote transcript read exited %d: %s", code, out)
+	}
+	return out, nil
+}
+
+var _ Transcripts = RemoteTranscripts{}
