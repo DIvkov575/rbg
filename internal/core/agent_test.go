@@ -140,6 +140,11 @@ func TestValidSessionID(t *testing.T) {
 		"tilde~home",  // tilde
 		"quote'quote", // single quote (shell breakout attempt)
 		"dollar$var",  // expansion
+		"-rf",         // leading dash (flag-injection into cat/ls)
+		"--all",       // leading double-dash
+		"back`tick",   // command substitution
+		"pipe|pipe",   // pipe
+		"amp&amp",     // background/chain
 	}
 	for _, id := range invalid {
 		if ValidSessionID(id) {

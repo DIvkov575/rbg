@@ -117,6 +117,12 @@ func ValidSessionID(id string) bool {
 	if id == "" {
 		return false
 	}
+	if id[0] == '-' {
+		// A leading '-' would be inert to quoting but could be read as a flag by
+		// cat/ls in the remote transcript command; real session ids never start
+		// with '-', so reject it outright.
+		return false
+	}
 	for _, r := range id {
 		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-') {
 			return false
