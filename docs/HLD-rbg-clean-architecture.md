@@ -1,182 +1,268 @@
-# HLD: rbg Clean Architecture — One Agent Model, Orthogonal Axes (`rbg-clean`)
+# HLD: rbg — Delegate and Synchronize Agent Work Across Machines (`rbg`)
 
-**Date:** 2026-06-30 · **Author:** divkov · **Status:** Design (greenfield)
-**Framing:** A clean-slate design of rbg's client/model/UI layer, unconstrained by
-the current implementation. Not a migration of today's code — the target shape as
-if built fresh. Supersedes all prior TUI/agent design HLDs as the forward plan.
-**Kept as-is (proven, shipped, out of scope for the rewrite):** the SSH transport
-(`sshx`, mux), the desktop `rbg-agent` binary, the `claude` contract
-(`claudecli`), config loading (`config`). These are the verified plumbing; the
-rewrite is everything that *models and presents* agents.
+**Date:** 2026-06-30 · **Author:** divkov · **Status:** Design
 
-## 1. The one idea
+## 1. Overview
 
-Today rbg has three notions — remote agents, local agents, queue items — plus a
-bolt-on "foreign" flag, each with its own type, store, and code path. The clean
-insight: **these are not different things. They are one thing — an Agent —
-described by orthogonal attributes.** Collapse the taxonomy into axes:
+### 1.1 Background
+`rbg` is a laptop CLI for running Claude Code agents on other machines — chiefly
+an always-on dev-desktop reached over SSH. The transport is proven and shipped: a
+multiplexed SSH channel, a small desktop helper binary, and a verified contract
+for launching and resuming headless `claude` sessions. What has *not* settled is
+how rbg **models and presents** the work: several overlapping notions of "an
+agent" have accreted, and each new capability has been harder to add than the
+last. This HLD redesigns that model and its surface from the problem down.
+
+### 1.2 Problem Statement
+Delegating a task to another machine, today, without rbg's help, means:
+- **Manual SSH juggling** — remembering hosts, `cd`-ing to the right directory,
+  invoking `claude` by hand, then SSH-ing back to check on it, across many
+  terminals and with all the state in the operator's head.
+- **No unified view** — agents run in scattered places (laptop, desktop, and some
+  started by hand outside rbg) with no single list of what is running where and in
+  what state.
+- **Code/repo drift** — the target machine's checkout is stale or diverged, so
+  delegating a task first requires reconciling git state, which is easy to get
+  wrong and easy to forget.
+
+And rbg's own model has drifted: overlapping agent notions with parallel storage
+and parallel code paths, so a new view or capability touches many places at once.
+
+### 1.3 Goals
+- **Delegate seamlessly** — compose a task and run it on a chosen machine without
+  manual SSH, either immediately or held for manual launch later.
+- **One unified view** — a single, accurate picture of every agent on every
+  managed machine, whoever started it.
+- **Keep machines in sync** — both the *code* a task runs against and the *agent
+  list itself* stay aligned across machines; conversation transcripts are a
+  secondary convenience.
+- **Stay simple to extend** — one coherent model so a new view or action is a
+  small, local change, not a cross-cutting one.
+
+## 2. Requirements
+
+### 2.1 Functional
+- **F1 — Delegate a task to a machine.** Choose a machine and a working context
+  (a repository/directory), give a task, and run it there. "Machine" includes the
+  laptop itself, so local and remote delegation are the same operation.
+- **F2 — Fire now or hold for later.** A delegated task may run immediately, or be
+  prepared and held until the operator manually launches it (e.g. after a prior
+  job finishes). Held tasks always carry a real task description — there are no
+  empty placeholder agents. Launching is always a manual act; rbg does not
+  schedule.
+- **F3 — Unified inventory.** Present one list of all agents across all managed
+  machines, each showing where it runs, its live state, and whether rbg started
+  it. Agents launched outside rbg on a managed machine appear here too and can be
+  taken under management.
+- **F4 — Act on any agent.** From the inventory: read its output, continue it with
+  a follow-up, and stop it — regardless of which machine it is on.
+- **F5 — Code synchronization.** Before running a delegated task, reconcile the
+  target's repository state so the task runs against the intended code; surface
+  each context's sync status (aligned / ahead / behind / dirty) in the view.
+- **F6 — Agent-list synchronization.** The inventory reflects reality on every
+  managed machine, reconciling rbg's own records with what is actually running
+  there, so the list does not drift from the machines it describes.
+- **F7 — Group by project.** Offer a view that groups agents by the repository
+  they belong to, carrying that context's sync status, since a repo is the natural
+  unit an operator reasons about when delegating.
+- **F8 — Transcript access (secondary).** Allow reading a remote agent's
+  conversation from the laptop, copying its transcript across machines on demand.
+- **F9 — Scriptable surface.** Every operation is available non-interactively (not
+  only through the interactive dashboard), so agents and scripts can drive rbg.
+
+### 2.2 Non-Functional
+- Single self-contained binary per machine; no third-party runtime dependencies;
+  no long-running daemon on the desktop.
+- The interactive surface is testable without a real terminal or a real SSH
+  connection (I/O is injected, not hard-wired).
+- Adding a view or an action should be a local change, not a change rippling
+  through parallel type hierarchies.
+
+### 2.3 Out of Scope
+- Scheduling or time/event-triggered execution (F2 is manual-launch only).
+- Empty/blank placeholder agents (a held task always has a task).
+- Managing arbitrary machines beyond the operator's laptop and configured
+  desktop(s).
+- Transcript *merging* or live process migration between machines.
+- Credential/auth brokering for the remote machine (private-repo auth on the
+  remote is a known limitation, not solved here).
+
+## 3. Solution Options
+
+The central decision is **how to model "an agent"** so that local/remote,
+now/later, and rbg-started/foreign all coexist without multiplying types and
+storage. Everything else (views, sync, actions) follows from this choice.
+
+**Option A — Distinct types per notion.** A separate type, store, and code path
+for each notion (remote agent, local agent, held task, foreign agent). *This is
+essentially today's shape.* Straightforward to read one path in isolation, but
+every capability that spans notions (a unified list, a shared action, a new view)
+must be implemented once per type. Cross-cutting features are expensive and drift
+apart — the observed failure mode.
+
+**Option B ★ — One agent concept described by independent attributes.** There is a
+single notion of "a delegated unit of work," and the distinctions are *attributes*
+of it, not separate types:
+- *where* it runs (a machine — the laptop is just one machine),
+- *how far along* it is (prepared-but-held → running → finished),
+- *whether rbg started it* (managed vs. discovered-and-adoptable),
+- its *code sync status* (derived from the repository it targets).
+
+A held task is one whose lifecycle attribute is "not yet launched." A local agent
+and a remote agent differ only in *where*. A foreign agent differs only in
+*whether rbg started it*, and adopting it just flips that attribute. Because the
+distinctions are independent attributes rather than a fixed enumeration of types,
+a new combination needs no new type, and every view is a *filter or grouping* over
+the one inventory. Cross-cutting features — the very ones that are expensive under
+Option A — become the cheap, default case. **Chosen.**
+
+**Option C — Model per lifecycle stage.** Separate "task to run" and "running
+session" as different first-class things joined by reference. Cleaner than A, but
+re-introduces two vocabularies for what the operator experiences as one thing
+moving through stages, and forces every view to join across them. Rejected in
+favor of B's single-vocabulary model.
+
+## 4. Current State
 
 ```
-Agent {
-    Name    string          // stable handle
-    Repo    string          // git URL / identity  (grouping key)
-    Dir     string          // working directory on its host
-    Task    string          // the prompt (empty = blank/draft)
-    Session string          // claude sessionId once run ("" = never run)
-
-    Where   Location        // Local | Remote        — which machine
-    State   Lifecycle       // Draft | Running | Done — where in its life
-    Origin  Origin          // Native | Foreign       — did rbg create it
-    Sync    SyncState        // derived: repo git state
-    RunAt   string          // last run time
-}
+        laptop (rbg)                              dev-desktop
+   ┌────────────────────┐                    ┌──────────────────┐
+   │ remote-agent store │──── SSH (mux) ────▶│  helper binary   │
+   │ held-task store    │                    │  runs `claude`   │
+   │ local-agent store  │  (each notion its  │  (headless)      │
+   │ + foreign flag     │   own type + path) │                  │
+   └────────┬───────────┘                    └──────────────────┘
+            │ interactive surface driven by many mode flags
+            ▼
+     views are bespoke per notion; a shared action is written N times
 ```
 
-Everything the session asked for is now a *value on one struct*, not a new type:
-- **Queue** = `State==Draft` agents (created, not yet run). Not a separate store.
-- **Local vs remote agents** = `Where`. Same struct, same list, same actions.
-- **Blank agent pinned to a repo** = `State==Draft, Task==""`.
-- **Foreign agent** = `Origin==Foreign` (discovered from `claude agents --json`,
-  not in rbg's records). Adopt = flip to `Native`.
-- **Sync state / cross-device** = `Sync` + a transcript-copy action.
+What breaks: the transport works, but the *model* fragments the same idea into
+several types with parallel storage and parallel handling. A unified list, a
+shared action, or a new view must be built once per notion, so features that span
+notions are expensive and tend to drift out of agreement. This is the concrete
+motivation for the redesign — not a transport problem.
 
-One noun, one store, one list. The four views are pure *lenses* over `[]Agent`.
+## 5. Design Proposal
 
-## 2. Goals
-- **One domain type (`Agent`), one repository (`Store`)** — no `Kind` union, no
-  parallel stores, no typed-pointer soup.
-- **Orthogonal axes** (Where / State / Origin) instead of a flat enum, so new
-  combinations don't need new types.
-- **Screen = an interface; navigation = a stack.** No boolean mode-flags.
-- Invariants: pure model (no I/O in Update/View), stdlib-only, TTY-free tests,
-  single static binary, no desktop daemon.
-- Because it's greenfield: optimize for the *end shape*, not migration. (Delivery
-  is still sliced — §6 — but the design isn't shaped by "don't break today.")
-
-## 3. Verified facts (the plumbing the clean layer sits on)
-- `claude agents --json --all` → every background session on a host
-  (`{id,cwd,sessionId,name,state,startedAt}`), regardless of spawner — the single
-  source for both native and foreign agents. (Live desktop.)
-- Transcripts: `~/.claude/projects/<cwd-slug>/<sessionId>.jsonl`, identical layout
-  both devices → transcript sync is a whole-file scp over the SSH mux.
-- Git sync: `git rev-list --left-right --count @{u}...HEAD`, `git status
-  --porcelain`, `git rev-parse @{u}`.
-- Headless run: `claude -p <task> --session-id <uuid> --dangerously-skip-permissions`
-  (launch), `--resume <uuid>` (continue). Proven against the live host.
-- SSH mux (`~/.rbg/cm-*`), `rbg-agent` verbs, and `sshx` quoting all shipped.
-
-## 4. Architecture
-
-### 4.1 Layers (clean separation)
+### 5.1 Architecture
 ```
- cmd/rbg            entrypoint: raw CLI verbs + launch the dashboard
-   │
- ui/  (pure)        Screen interface + screen stack; lenses over []Agent
-   │  Update(Model,Key)->(Model,Action)   View(Model)->string     (no I/O)
- core/ (pure)       Agent, Store (in-mem ops), lenses (filter/group/sync-badge)
-   │
- host/ (I/O)        one interface per capability, impls behind it:
-                      AgentSource  (list agents on a host: local + remote)
-                      Runner       (spawn/resume claude; local exec | ssh)
-                      Repo         (clone/pull/sync-state; git)
-                      Transcripts  (read/copy .jsonl across devices)
-   │
- [kept] sshx · claudecli · rbg-agent · config
+   Interactive dashboard  ────┐        ┌──── Scriptable command surface (F9)
+   (views = filters/groups)   │        │
+                              ▼        ▼
+                     ┌────────────────────────┐
+                     │  Presentation (pure)    │  no I/O: given the inventory +
+                     │  views, navigation      │  input, produce screen + intent
+                     └───────────┬────────────┘
+                                 │ intents
+                     ┌───────────▼────────────┐
+                     │  Domain (pure)          │  the ONE agent concept;
+                     │  inventory, lenses,     │  reconcile records vs. reality;
+                     │  sync-status derivation │  filter / group (F3,F5,F6,F7)
+                     └───────────┬────────────┘
+                                 │ capability calls
+                     ┌───────────▼────────────┐
+                     │  Capabilities (I/O)     │  narrow interfaces, per concern:
+                     │  • list agents on a host│   (F3,F6)
+                     │  • run / continue / stop│   (F1,F2,F4)
+                     │  • repo sync + status   │   (F5)
+                     │  • transcript transfer  │   (F8)
+                     └───────────┬────────────┘
+                                 │
+                   ┌─────────────▼──────────────┐
+                   │  Existing transport (kept)  │  SSH mux · desktop helper ·
+                   │                             │  claude contract · config
+                   └─────────────────────────────┘
 ```
-The dashboard loop wires `host/` impls into the pure `ui/`+`core/` via one
-`Deps`-style struct of function values (as today), but the *surface* is small
-because there's one Agent model, not three.
+Four layers, dependencies pointing inward. **Presentation** and **Domain** are
+pure — no I/O — so both the dashboard and the scriptable surface (F9) are thin
+consumers of the same core, and the interactive surface is testable without a
+terminal or SSH (NFR). **Capabilities** are narrow interfaces (one per concern)
+with a real implementation over the existing transport and a fake for tests. The
+transport layer is proven and unchanged.
 
-### 4.2 The Store (one place agents come from)
-`Store.Refresh(ctx)` builds `[]Agent` by reconciling three inputs into the one
-model:
-1. rbg's **persisted records** (the agents you created/ran — `~/.rbg/agents.json`,
-   one file replacing today's queue + local-agent stores).
-2. **Live local** `claude agents --json` (laptop).
-3. **Live remote** `claude agents --json` over SSH (desktop).
+### 5.2 The one agent concept (Option B, abstractly)
+Domain holds a single kind of thing — a *delegated unit of work* — carrying its
+identity (a stable handle, the repository/directory it targets, its task text, and
+its session identity once it has run) plus the independent attributes from §3:
+*where* it runs, *how far along* it is, *whether rbg started it*, and its *derived
+code-sync status*. No separate types for local/remote/held/foreign; those are
+readings of these attributes.
 
-Reconciliation by `sessionId`/name sets `Where`, `State` (from claude's live
-state), and `Origin` (in records → Native; live-but-not-in-records → Foreign).
-Sync state is filled per distinct `Repo`/`Dir` from the `Repo` capability. Result:
-one `[]Agent` that *is* reality across both machines.
+### 5.3 One inventory, reconciled (F3, F6)
+There is a single inventory of agents, not one store per notion. It is produced by
+**reconciling rbg's own records with live reality on each managed machine**: query
+what agents actually exist on each host, match them against what rbg recorded, and
+from the match set each agent's attributes — *where* (which host answered), *how
+far along* (the host's reported state), and *whether rbg started it* (in records →
+managed; present on a host but not in records → foreign, and adoptable per F3).
+Code-sync status (§5.5) is filled per repository/context. The result is one list
+that *is* the reconciled truth across machines, refreshed on open and on demand
+rather than continuously.
 
-### 4.3 Views as pure lenses
-```
-Remote   = filter Where==Remote
-Local    = filter Where==Local
-Combined = all, sectioned by Where
-Project  = all, group by Repo, each group carries a Sync badge   ← keystone
-```
-`ctrl-s` cycles them. Project view is the launcher+lens: a group is a repo, its
-rows are every agent (any Where/Origin) on it, header shows the sync badge, and
-you can dispatch a new agent into the group (local or remote). Draft agents
-(the old "queue") render inline with a distinct glyph and a "run" action.
+### 5.4 Views as filters and groupings (F3, F7)
+Because there is one inventory, every view is a **lens** over it, not a bespoke
+screen bound to a type:
+- by machine — agents on the laptop, or on the desktop,
+- combined — everything, sectioned by machine,
+- **by project** — grouped by repository, each group carrying its sync status
+  (F5, F7); this doubles as the delegation surface, since a group *is* the repo
+  context a new task would target.
+Held tasks (F2) and foreign agents (F3) are not separate views — they are just
+agents with a particular lifecycle or origin attribute, shown inline with a
+distinct marker and the appropriate available actions.
 
-### 4.4 Screen + stack (navigation)
-```go
-type Screen interface {
-    Update(m *Model, k Key) (Screen, Action) // self | pushed child | nil=pop
-    View(m *Model, w, h int) string
-    Hints() string
-}
-```
-`Model{ agents []Agent; view ViewMode; stack []Screen; ... }`. Screens: the four
-lenses (or one list-screen parameterized by `view`), plus small pushed children
-for text entry (task), dir-browse, config. `esc` pops. One key-decode helper;
-each screen interprets keys. No mode booleans anywhere.
+### 5.5 Code synchronization (F5)
+Delegation is **sync-first**: before a task runs on a machine, rbg reconciles the
+target repository so the task runs against the intended code, and it surfaces each
+context's status — aligned, ahead, behind, or dirty — in the by-project view so
+the operator sees drift before acting. Status derivation is a pure function of
+observed repository facts; performing the reconciliation is a capability call.
 
-### 4.5 Actions (uniform verb set, gated by axes)
-One `Action` set the loop fulfills; which are *offered* depends on the selected
-agent's axes:
-- `Run` (Draft→Running): local = `claude -p` in `Dir`; remote = clone/pull +
-  `rbg-agent` launch. **Sync-first** always (pull before run).
-- `Send`, `Read`, `Attach`, `Kill` — as today, dispatched by `Where`.
-- `SyncTranscript` — scp the agent's `.jsonl` between devices.
-- `Adopt` (Foreign→Native), `Create` (new Draft, optionally blank).
-- Prompt injection: `Run`/`Send` pass the task through `claudecli.WithHandoff`
-  (read-on-launch, write-on-both; `RBG_HANDOFF=0` off).
-
-### 4.6 CLI parity (agent-usable, TTY-free)
-Every action has a `raw` verb (`rbg raw run|send|read|kill|create|sync|adopt|ls`)
-operating on the same `Store`, so automation/non-interactive agents use rbg
-without the dashboard. The dashboard is one consumer of core+host; the CLI is
+### 5.6 Actions, gated by attributes (F1, F2, F4, F8)
+There is one vocabulary of actions; which are *offered* for a given agent follows
+from its attributes:
+- **Run / launch** — for a fire-now task, or to manually launch a held one (F1,
+  F2); always sync-first (§5.5); dispatched to local execution or to the remote
+  helper according to *where*.
+- **Continue** (follow-up), **Read** (output/transcript), **Stop** — for a running
+  agent, dispatched by *where* (F4, F8).
+- **Adopt** — for a foreign agent, flips it to managed (F3).
+- **Sync transcript** — copy a conversation across machines on demand (F8).
+The interactive dashboard and the scriptable surface (F9) invoke the *same*
+actions against the *same* inventory; the dashboard is one front-end, scripting is
 another.
 
-## 5. Why this is cleaner than the current design
-| Current | Clean |
-|---|---|
-| `Kind{Remote,Local,Queued}` + `Foreign bool` + 3 typed pointers | orthogonal `Where`/`State`/`Origin` on one `Agent` |
-| 3 stores (sessions, queue, local-agents) | 1 `Store` (`~/.rbg/agents.json`) reconciled with live `claude agents` |
-| 8 boolean mode-flags, 5 decoders, chained Update/View | `Screen` stack, 1 decode helper, `top.Update`/`top.View` |
-| queue is a sibling subsystem | queue = `State==Draft` |
-| foreign agents invisible / bolt-on | foreign = `Origin==Foreign`, first-class |
-| local run fire-and-forget & untracked; 2 local paths | one `Runner`, tracked, sync-first |
+## 6. Design Analysis
 
-New capability = a value on `Agent` or a new `Screen`, never a new type×3-files.
+### 6.1 Key Improvements
+- **Cross-cutting features become the default.** A unified list, a shared action,
+  and a new view — the things that were expensive per-notion — are now a filter, a
+  gate on an attribute, and a lens. New capability = a new attribute reading or a
+  new lens, not a new type replicated across storage and handling.
+- **The operator's mental model matches the code.** One "agent" that moves through
+  states and lives somewhere, exactly as experienced — no parallel vocabularies.
+- **Sync is first-class, not bolted on.** Code-sync status lives on the agent and
+  drives sync-first delegation; agent-list sync is the reconciliation that builds
+  the inventory, so "the list is accurate everywhere" is structural, not a feature
+  to remember to run.
+- **Testable and scriptable by construction.** Pure Domain/Presentation + injected
+  Capabilities means the dashboard is testable without a TTY/SSH, and the
+  scriptable surface reuses the identical core.
 
-## 6. Delivery (greenfield, but still staged)
-1. **`core/`** — `Agent`, `Store` (+ reconcile), lenses, sync-badge. Pure, fully
-   tested. No UI yet.
-2. **`host/`** — the four capability interfaces + real impls (reuse `sshx`/
-   `claudecli`/`rbg-agent`); a fake impl for tests.
-3. **`ui/`** — `Screen` + stack + the list-screen with the four lenses; project
-   grouping; text/browse child screens.
-4. **`cmd/rbg`** — raw verbs on the Store; wire the dashboard.
-5. **Transcript sync + foreign adopt + handoff** — small additions on the above.
-
-Old `internal/{queue,localagent,tui}` are replaced, not migrated (this is the
-"forget what we have" mandate); `session`/`agent`/`sshx`/`claudecli`/`config`
-stay. Ship `core`+`host`+`raw` CLI first (usable headless), dashboard second.
-
-## 7. Non-goals
-No scheduling; no third-party deps / no Bubble Tea; no desktop daemon; no
-transcript merge (whole-file, newest-wins); laptop↔configured-desktop only; no
-live process migration.
-
-## 8. Risks
+### 6.2 Risks
 | Risk | Mitigation |
 |---|---|
-| Greenfield throws away working TUI code | The *transport* (proven) is kept; only the drifted model/UI is rewritten. Ship the headless `core+host+raw` path first — it's verifiable without a TTY — then the dashboard |
-| One `Agent` struct becomes a god-object | Axes are small enums + strings; behavior lives in lenses/actions/host, not on the struct; struct is data only |
-| Reconcile mis-classifies native/foreign | Match on `sessionId` (stable), fall back to name+dir; Adopt is explicit and idempotent |
-| Live `claude agents` latency per refresh | Refresh on open/`r`, not per keystroke; per-repo sync cached with a short TTL |
+| Collapsing notions into one concept over-generalizes and the concept becomes a catch-all | The attributes are few and independent; behavior lives in lenses/actions/capabilities, not on the concept — it stays data, not a god-object |
+| Reconciliation mis-classifies managed vs. foreign agents | Match on the stable session identity first, fall back to handle+context; adoption is explicit and idempotent |
+| Querying live reality on every refresh is slow | Refresh on open and on explicit request, not continuously; cache per-context sync status briefly |
+| Sync-first delegation blocks on repo state rbg can't resolve (e.g. remote auth) | Surface the drift/failure in the view and let the operator choose; do not silently proceed against wrong code (auth brokering is explicitly out of scope) |
+| Reintroducing drift by letting the scriptable and interactive surfaces diverge | Both are thin consumers of the same Domain actions and inventory; no logic lives in either front-end |
+
+### 6.3 Delivery Order
+Requirements suggest a natural sequence, each independently verifiable: the pure
+**Domain** (the one concept, reconciliation, lenses, sync-status) first; then the
+**Capabilities** over the existing transport (with fakes for test); then the
+**scriptable surface** (F9) — fully usable and testable headless; then the
+interactive **dashboard** as the second front-end. Transcript transfer (F8) and
+foreign-agent adoption (F3) are small additions on top of that spine.
