@@ -76,16 +76,19 @@ func (s *listScreen) Hints() string {
 	return "j/k move · ctrl-s view · enter read · g run · s send · x kill · A adopt · n new · r refresh · q quit"
 }
 
-// View renders the list screen: a header (view name + counts), the body (the
-// current lens), a status line, and the hints footer.
+// View renders the list screen: a title bar (view name + counts + the view
+// cycle), the body (the current lens), a status line, and the hints footer.
 func (s *listScreen) View(m *Model) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "rbg — %s view  (%d agents)\n\n", m.View, len(m.Agents))
+	title := fmt.Sprintf(" rbg · %s · %d agents ", m.View, len(m.Agents))
+	b.WriteString(fg(colBlue, bold(title)))
+	b.WriteString(dim(fmt.Sprintf("   [remote|local|combined|project]  ctrl-s cycles")))
+	b.WriteString("\n\n")
 	b.WriteString(renderList(m))
 	if m.Status != "" {
-		fmt.Fprintf(&b, "\n%s\n", m.Status)
+		fmt.Fprintf(&b, "\n%s\n", fg(colYellow, m.Status))
 	}
-	fmt.Fprintf(&b, "\n%s\n", s.Hints())
+	fmt.Fprintf(&b, "\n%s\n", dim(s.Hints()))
 	return b.String()
 }
 

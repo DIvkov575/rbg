@@ -56,11 +56,11 @@ func TestRenderMarksCursorRow(t *testing.T) {
 	m := viewModel(ViewRemote)
 	m.Cursor = 1
 	out := renderList(m)
-	// the cursor marker (">") precedes the selected row's name
+	// the cursor marker precedes the selected row's name
 	lines := strings.Split(out, "\n")
 	var marked string
 	for _, ln := range lines {
-		if strings.Contains(ln, ">") && (strings.Contains(ln, "rem-run") || strings.Contains(ln, "wild")) {
+		if strings.Contains(ln, cursorMarker) && (strings.Contains(ln, "rem-run") || strings.Contains(ln, "wild")) {
 			marked = ln
 		}
 	}
@@ -99,10 +99,10 @@ func TestProjectCursorMarksSelectedAgent(t *testing.T) {
 			t.Fatalf("cursor %d: no selection", i)
 		}
 		out := renderList(m)
-		// the marked ("> ") line must contain the selected agent's name.
+		// the marked line must contain the selected agent's name.
 		var marked string
 		for _, ln := range strings.Split(out, "\n") {
-			if strings.HasPrefix(ln, "> ") {
+			if strings.HasPrefix(ln, cursorMarker) {
 				marked = ln
 			}
 		}
@@ -120,7 +120,7 @@ func TestCombinedCursorMarksSelectedAgent(t *testing.T) {
 		out := renderList(m)
 		var marked string
 		for _, ln := range strings.Split(out, "\n") {
-			if strings.HasPrefix(ln, "> ") {
+			if strings.HasPrefix(ln, cursorMarker) {
 				marked = ln
 			}
 		}

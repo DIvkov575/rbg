@@ -56,7 +56,7 @@ func (s *pagerScreen) Update(m *Model, k Key, r rune) Action {
 
 func (s *pagerScreen) View(m *Model) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n\n", s.title)
+	fmt.Fprintf(&b, "%s\n\n", fg(colBlue, bold(s.title)))
 	win := s.window(m)
 	end := s.offset + win
 	if end > len(s.lines) {
@@ -66,7 +66,7 @@ func (s *pagerScreen) View(m *Model) string {
 		b.WriteString(s.lines[i])
 		b.WriteByte('\n')
 	}
-	fmt.Fprintf(&b, "\n%s\n", s.Hints())
+	fmt.Fprintf(&b, "\n%s\n", dim(s.Hints()))
 	return b.String()
 }
 

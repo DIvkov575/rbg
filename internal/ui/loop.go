@@ -93,6 +93,11 @@ func applyAction(m *Model, ops Ops, act Action) bool {
 // inventory, enters raw mode, and on each key: decodes it, hands it to the top
 // screen's Update, fulfills the returned Action, and redraws. EOF quits.
 func Run(ops Ops, io Stdio) error {
+	// A real interactive terminal gets ANSI styling (colour, reverse-video
+	// selection, dimmed chrome); tests and pipes leave Styled off for plain text.
+	Styled = true
+	defer func() { Styled = false }()
+
 	m := NewModel(nil)
 	refresh(m, ops)
 	w, h := termSize(os.Stdin.Fd())
