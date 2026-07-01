@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestIsScriptableClassifiesVerbs(t *testing.T) {
 	for _, v := range []string{"ls", "create", "run", "send", "read", "kill", "adopt"} {
@@ -12,6 +15,17 @@ func TestIsScriptableClassifiesVerbs(t *testing.T) {
 		if isScriptable(v) {
 			t.Errorf("verb %q should NOT be scriptable", v)
 		}
+	}
+}
+
+func TestMigrationHint(t *testing.T) {
+	if h := migrationHint("launch"); h == "" {
+		t.Errorf("launch should have a migration hint to create+run")
+	} else if !strings.Contains(h, "create") || !strings.Contains(h, "run") {
+		t.Errorf("launch hint should mention create and run: %q", h)
+	}
+	if migrationHint("frob") != "" {
+		t.Errorf("frob should have no migration hint")
 	}
 }
 

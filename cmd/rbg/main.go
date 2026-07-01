@@ -47,8 +47,23 @@ func main() {
 		}
 		os.Exit(cli.Dispatch(args, e, os.Stdout, os.Stderr))
 	}
+	if hint := migrationHint(verb); hint != "" {
+		fmt.Fprintf(os.Stderr, "rbg: %q was removed. %s\n\n%s", verb, hint, cli.Usage())
+		os.Exit(2)
+	}
 	fmt.Fprintf(os.Stderr, "rbg: unknown command %q\n\n%s", verb, cli.Usage())
 	os.Exit(2)
+}
+
+// migrationHint points a user at the new verb for a removed one, so the biggest
+// behavior change in the rewrite (launch → create+run) fails loudly with a path
+// forward rather than a bare "unknown command".
+func migrationHint(verb string) string {
+	switch verb {
+	case "launch":
+		return "stage the task with `rbg create <name> <repo> <task>`, then start it with `rbg run <name>`."
+	}
+	return ""
 }
 
 // isScriptable reports whether a verb is handled by the engine-backed CLI.
