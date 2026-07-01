@@ -79,4 +79,15 @@ func TestNewSessionIDShapeAndUniqueness(t *testing.T) {
 			}
 		}
 	}
+	// v4-ness: the 13th char (group[2][0]) must be '4' (version), and
+	// group[3][0] must be one of 8,9,a,b (variant) — the two nibbles the
+	// bit-masking sets. Guards against a regression dropping the masks.
+	if groups[2][0] != '4' {
+		t.Errorf("version nibble = %q, want '4' (not a v4 UUID)", groups[2][0])
+	}
+	switch groups[3][0] {
+	case '8', '9', 'a', 'b':
+	default:
+		t.Errorf("variant nibble = %q, want one of 8/9/a/b", groups[3][0])
+	}
 }
