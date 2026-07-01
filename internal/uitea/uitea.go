@@ -21,15 +21,17 @@ type Ops interface {
 	Read(name string) ([]byte, error)
 	Kill(name string) error
 	Adopt(name string) error
+	Projects() []core.Project
 }
 
 // mode is which screen the model is showing.
 type mode int
 
 const (
-	modeList  mode = iota // the agents list
-	modeInput             // composing a create or send
-	modePager             // reading a transcript
+	modeList   mode = iota // the agents list
+	modeInput              // composing a create or send (task text)
+	modePager              // reading a transcript
+	modePicker             // choosing a project for a new agent
 )
 
 // --- messages (results of async engine work) ---
@@ -61,8 +63,9 @@ type Model struct {
 	status string
 	mode   mode
 
-	input inputModel
-	pager pagerModel
+	input  inputModel
+	pager  pagerModel
+	picker pickerModel
 }
 
 // New builds a dashboard model over ops.

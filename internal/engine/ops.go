@@ -16,6 +16,17 @@ func (e *Engine) List() ([]core.Agent, error) {
 	return host.Inventory(e.store.Records(), e.local.Source, e.remote.Source)
 }
 
+// Projects returns suggested targets for a new agent — local checkouts, remote
+// checkouts, GitHub repos, and repos already in use — unified and deduped. Used
+// by the create flow to offer a picker instead of free-text repo entry. Returns
+// nil if no suggestion source is wired (e.g. a struct-literal test engine).
+func (e *Engine) Projects() []core.Project {
+	if e.projects == nil {
+		return nil
+	}
+	return e.projects()
+}
+
 // Create stages a delegated task as a held record, to be launched later (HLD
 // F2). It forces State=Held and Origin=Managed, requires a non-empty name and
 // task (there are no blank agents), and rejects a name already in the store.
