@@ -113,6 +113,46 @@ func TestDispatchCreate(t *testing.T) {
 	}
 }
 
+func TestDispatchCreateDefaultsToLocalWhere(t *testing.T) {
+	// The 3-arg form leaves Where unset, which the engine defaults to local.
+	var out, errOut bytes.Buffer
+	ops := &fakeOps{}
+	Dispatch([]string{"create", "later", "repo", "task"}, ops, &out, &errOut)
+	if ops.created == nil {
+		t.Fatalf("Create not called")
+	}
+	if ops.created.Where != "" {
+		t.Errorf("3-arg create should leave Where unset (engine defaults it), got %q", ops.created.Where)
+	}
+}
+
+func TestDispatchCreateRemoteFlag(t *testing.T) {
+	var out, errOut bytes.Buffer
+	ops := &fakeOps{}
+	code := Dispatch([]string{"create", "--remote", "job", "repo", "task"}, ops, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("create --remote should succeed, got %d (%s)", code, errOut.String())
+	}
+	if ops.created == nil || ops.created.Where != core.Remote {
+		t.Errorf("--remote should set Where=remote, got %+v", ops.created)
+	}
+	if ops.created.Name != "job" {
+		t.Errorf("flag consumed the wrong arg: name=%q", ops.created.Name)
+	}
+}
+
+func TestDispatchCreateLocalFlag(t *testing.T) {
+	var out, errOut bytes.Buffer
+	ops := &fakeOps{}
+	code := Dispatch([]string{"create", "--local", "job", "repo", "task"}, ops, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("create --local should succeed, got %d", code)
+	}
+	if ops.created == nil || ops.created.Where != core.Local {
+		t.Errorf("--local should set Where=local, got %+v", ops.created)
+	}
+}
+
 func TestDispatchCreateWrongArgs(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := Dispatch([]string{"create", "onlyname"}, &fakeOps{}, &out, &errOut); code != 2 {

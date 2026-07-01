@@ -1,9 +1,12 @@
 package core
 
 // Live is one element of `claude agents --json --all` (verified shape, claude
-// v2.1.197): keys id, cwd, kind, sessionId, name, state, startedAt, and
-// optionally pid/status. startedAt is Unix-milliseconds. We decode only the
-// fields reconcile needs.
+// v2.1.197 on dev-desktop 2026-07-01): keys id, cwd, kind, sessionId, name,
+// state, startedAt. Notably there is NO pid field, and `claude agents` exposes
+// no stop/kill subcommand — so an agent rbg did not launch (Foreign) cannot be
+// killed via pid; only agents rbg spawned locally carry a tracked pid (in the
+// Store). startedAt is Unix-milliseconds. We decode only the fields reconcile
+// needs.
 type Live struct {
 	SessionID string `json:"sessionId"`
 	Name      string `json:"name"`

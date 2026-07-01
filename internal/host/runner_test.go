@@ -5,6 +5,7 @@ import (
 
 	"github.com/divkov575/rbg/internal/config"
 	"github.com/divkov575/rbg/internal/run"
+	"github.com/divkov575/rbg/internal/session"
 )
 
 func joined(args []string) string {
@@ -164,6 +165,46 @@ func TestLocalRunnerSendSpawnsResume(t *testing.T) {
 	j := joined(sp.calls[0].args)
 	if !contains(j, "--resume") || !contains(j, "sid-9") || !contains(j, "next step") {
 		t.Errorf("resume args wrong: %v", sp.calls[0].args)
+	}
+}
+
+func TestLocalRunnerSendBusyWhenLockHeld(t *testing.T) {
+	// While a send to the same session is in flight (its lock held), a second
+	// send must return ErrBusy rather than spawning a racing resume — matching
+	// the remote exit-3 semantics.
+	dir := t.TempDir()
+	sp := &recordingSpawn{pid: 1}
+	lr := LocalRunner{Spawn: sp.spawn, LockDir: dir}
+
+	// Simulate an in-flight send by holding the session's lock.
+	held, ok, err := session.TryLock(lr.lockPath("sid-busy"))
+	if err != nil || !ok {
+		t.Fatalf("could not pre-acquire lock: ok=%v err=%v", ok, err)
+	}
+	defer held.Unlock()
+
+	if err := lr.Send("sid-busy", "second"); err != ErrBusy {
+		t.Errorf("Send while locked = %v, want ErrBusy", err)
+	}
+	if len(sp.calls) != 0 {
+		t.Errorf("busy Send must not spawn, got %d calls", len(sp.calls))
+	}
+}
+
+func TestLocalRunnerSendReleasesLockForNextSend(t *testing.T) {
+	// After a send completes, its lock is released so a subsequent send succeeds.
+	dir := t.TempDir()
+	sp := &recordingSpawn{pid: 1}
+	lr := LocalRunner{Spawn: sp.spawn, LockDir: dir}
+
+	if err := lr.Send("sid-x", "first"); err != nil {
+		t.Fatalf("first Send: %v", err)
+	}
+	if err := lr.Send("sid-x", "second"); err != nil {
+		t.Fatalf("second Send should succeed after lock release: %v", err)
+	}
+	if len(sp.calls) != 2 {
+		t.Errorf("want 2 spawns across two sends, got %d", len(sp.calls))
 	}
 }
 

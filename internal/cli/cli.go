@@ -70,13 +70,27 @@ func doLs(ops Ops, out, errOut io.Writer) int {
 	return 0
 }
 
-// doCreate stages a held task from `create <name> <repo> <task>`.
+// doCreate stages a held task from `create [--local|--remote] <name> <repo> <task>`.
+// The machine flag is optional and defaults to local (the engine chooses the
+// laptop when Where is unset); pass --remote to delegate to the desktop. This
+// makes the target machine an explicit choice rather than an unset field that
+// silently routes.
 func doCreate(rest []string, ops Ops, out, errOut io.Writer) int {
+	var where core.Location
+	// Optional leading machine flag.
+	if len(rest) > 0 {
+		switch rest[0] {
+		case "--local":
+			where, rest = core.Local, rest[1:]
+		case "--remote":
+			where, rest = core.Remote, rest[1:]
+		}
+	}
 	if len(rest) != 3 {
-		fmt.Fprintf(errOut, "usage: rbg create <name> <repo> <task>\n")
+		fmt.Fprintf(errOut, "usage: rbg create [--local|--remote] <name> <repo> <task>\n")
 		return 2
 	}
-	if _, err := ops.Create(core.Agent{Name: rest[0], Repo: rest[1], Task: rest[2]}); err != nil {
+	if _, err := ops.Create(core.Agent{Name: rest[0], Repo: rest[1], Task: rest[2], Where: where}); err != nil {
 		fmt.Fprintf(errOut, "rbg: %v\n", err)
 		return 1
 	}
@@ -142,7 +156,7 @@ func usage() string {
 
 Commands:
   ls                       list all agents (both machines)
-  create <name> <repo> <task>   stage a held task
+  create [--local|--remote] <name> <repo> <task>   stage a held task (default local)
   run <name>               launch (or re-run) a staged agent, sync-first
   send <name> <task>       send a follow-up to a running agent
   read <name>              print an agent's transcript

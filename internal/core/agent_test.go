@@ -153,3 +153,23 @@ func TestValidSessionID(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoDir(t *testing.T) {
+	const base = "/home/me/workplace"
+	const home = "/home/me"
+	cases := []struct {
+		name, repo, want string
+	}{
+		{"empty repo → empty", "", ""},
+		{"git url", "git@github.com:me/web-app.git", "/home/me/workplace/web-app"},
+		{"https url", "https://github.com/DIvkov575/mymemories.git", "/home/me/workplace/mymemories"},
+		{"bare name", "my-svc", "/home/me/workplace/my-svc"},
+		{"absolute path used verbatim", "/srv/app", "/srv/app"},
+		{"tilde expands to home", "~/code/thing", "/home/me/code/thing"},
+	}
+	for _, c := range cases {
+		if got := RepoDir(base, home, c.repo); got != c.want {
+			t.Errorf("%s: RepoDir(%q,%q,%q) = %q, want %q", c.name, base, home, c.repo, got, c.want)
+		}
+	}
+}

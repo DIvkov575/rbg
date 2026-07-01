@@ -2,6 +2,7 @@ package engine
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/divkov575/rbg/internal/core"
@@ -106,6 +107,73 @@ func TestRunLocalRecordsPid(t *testing.T) {
 	rec, _ := e.store.Get("l")
 	if rec.Pid != 5555 {
 		t.Errorf("Pid = %d, want 5555", rec.Pid)
+	}
+}
+
+func TestRunRefusesToReRunRunningAgent(t *testing.T) {
+	// Re-running would overwrite the live Session/Pid and orphan the child.
+	var launched string
+	loc := machine{
+		Source:    fakeSource{},
+		Repo:      fakeRepo{},
+		newRunner: runnerFactory(fakeRunner{launched: &launched}),
+	}
+	e := newTestEngine(t, loc, machine{Source: fakeSource{}})
+	e.store.Add(core.Agent{Name: "busy", Session: "OLD", Pid: 999, Task: "t", Where: core.Local, State: core.Running, Origin: core.Managed})
+
+	if err := e.Run("busy"); err == nil {
+		t.Errorf("Run on an already-running agent should error")
+	}
+	if launched != "" {
+		t.Errorf("must NOT launch a second child, but launched %q", launched)
+	}
+	rec, _ := e.store.Get("busy")
+	if rec.Session != "OLD" || rec.Pid != 999 {
+		t.Errorf("live identity was overwritten: %+v", rec)
+	}
+}
+
+func TestRunRejectsRepoWithoutDir(t *testing.T) {
+	var pulled string
+	loc := machine{
+		Source:    fakeSource{},
+		Repo:      fakeRepo{pulled: &pulled},
+		newRunner: runnerFactory(fakeRunner{res: host.RunResult{Name: "x", Session: "S"}}),
+	}
+	e := newTestEngine(t, loc, machine{Source: fakeSource{}})
+	e.store.Add(core.Agent{Name: "x", Repo: "app", Dir: "", Task: "t", Where: core.Local, State: core.Held, Origin: core.Managed})
+
+	if err := e.Run("x"); err == nil {
+		t.Errorf("Run should reject a repo-backed agent with an empty dir")
+	}
+	if pulled != "" {
+		t.Errorf("must not pull with an empty dir, pulled %q", pulled)
+	}
+}
+
+func TestRunAdoptsResolvedNameFromLaunch(t *testing.T) {
+	// The desktop rbg-agent deduped the name (job → job-2); Run must persist the
+	// resolved name and re-key the record so later Send/Kill target the right id.
+	rem := machine{
+		Source:    fakeSource{},
+		Repo:      fakeRepo{},
+		newRunner: runnerFactory(fakeRunner{res: host.RunResult{Name: "job-2", Session: "S9"}}),
+	}
+	e := newTestEngine(t, machine{Source: fakeSource{}}, rem)
+	e.store.Add(core.Agent{Name: "job", Task: "t", Where: core.Remote, State: core.Held, Origin: core.Managed})
+
+	if err := e.Run("job"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, ok := e.store.Get("job"); ok {
+		t.Errorf("old name %q should have been removed after dedup", "job")
+	}
+	rec, ok := e.store.Get("job-2")
+	if !ok {
+		t.Fatalf("record not re-keyed to resolved name job-2")
+	}
+	if rec.Session != "S9" || rec.State != core.Running {
+		t.Errorf("re-keyed record wrong: %+v", rec)
 	}
 }
 
@@ -266,6 +334,25 @@ func TestKillLocalWithoutPidErrors(t *testing.T) {
 
 	if err := e.Kill("loc"); err == nil {
 		t.Errorf("local Kill with no recorded pid should error")
+	}
+}
+
+func TestKillForeignLocalAgentGivesClearError(t *testing.T) {
+	// A foreign local agent has no tracked pid (claude exposes none), so it can't
+	// be killed via rbg — the error must say why rather than look like a bug.
+	loc := machine{
+		Source:    fakeSource{live: []core.Live{{SessionID: "F1", Name: "wild", Cwd: "/x", State: "working"}}},
+		newRunner: runnerFactory(fakeRunner{}),
+	}
+	e := newTestEngine(t, loc, machine{Source: fakeSource{}})
+	e.killLocal = func(pid int) error { t.Fatalf("must not attempt to kill without a pid"); return nil }
+
+	err := e.Kill("wild")
+	if err == nil {
+		t.Fatalf("killing a foreign local agent should error")
+	}
+	if !strings.Contains(err.Error(), "foreign") {
+		t.Errorf("error should explain the foreign-agent limitation, got: %v", err)
 	}
 }
 

@@ -37,13 +37,27 @@ func (Exec) Run(name string, args []string, stdin io.Reader) ([]byte, int, error
 	if stdin != nil {
 		cmd.Stdin = stdin
 	}
-	var out bytes.Buffer
+	// Capture stdout and stderr separately. Callers parse stdout (JSON replies,
+	// `claude agents` output) and must not see it polluted by warnings a command
+	// prints to stderr on success. But callers format FAILURES as
+	// "<cmd> exited N: <out>", and the diagnostic reason (git's "Not possible to
+	// fast-forward", claude's credential error, etc.) goes to stderr — so on a
+	// non-zero exit we append stderr to the returned bytes to make the message
+	// actionable rather than blank.
+	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
 	err := cmd.Run()
 	code := 0
 	if ee, ok := err.(*exec.ExitError); ok {
 		code = ee.ExitCode()
 		err = nil // exit code carries the signal; not a Go-level error
+	}
+	if code != 0 && errBuf.Len() > 0 {
+		if out.Len() > 0 {
+			out.WriteByte('\n')
+		}
+		out.Write(errBuf.Bytes())
 	}
 	return out.Bytes(), code, err
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/divkov575/rbg/internal/config"
 	"github.com/divkov575/rbg/internal/core"
 	"github.com/divkov575/rbg/internal/run"
+	"github.com/divkov575/rbg/internal/session"
 	"github.com/divkov575/rbg/internal/slug"
 	"github.com/divkov575/rbg/internal/sshx"
 )
@@ -122,6 +123,11 @@ type LocalRunner struct {
 	Dir string
 	// LogDir is where a launched child's stdout log is written ("" = os.TempDir).
 	LogDir string
+	// LockDir is where per-session send locks live ("" = os.TempDir). A send
+	// holds an exclusive flock on <LockDir>/rbg-send-<session>.lock so two
+	// concurrent sends to the same session can't both spawn a resume and race
+	// the transcript — mirroring the desktop rbg-agent's busy (exit 3) guard.
+	LockDir string
 }
 
 func (l LocalRunner) spawnFn() agent.SpawnFunc {
@@ -156,11 +162,34 @@ func (l LocalRunner) Launch(name, task string) (RunResult, error) {
 	return RunResult{Name: name, Session: session, Pid: pid}, nil
 }
 
+// lockPath returns the per-session send-lock path.
+func (l LocalRunner) lockPath(sess string) string {
+	dir := l.LockDir
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, "rbg-send-"+sess+".lock")
+}
+
 // Send continues a local claude session (identified by its session id) with a
-// follow-up task, by spawning a detached headless resume.
-func (l LocalRunner) Send(session, task string) error {
-	args := append([]string{"claude"}, claudecli.ResumeHeadlessArgs(session, task)...)
-	_, err := l.spawnFn()(args[0], args[1:], l.logPath(session), l.Dir)
+// follow-up task, by spawning a detached headless resume. It first takes an
+// exclusive per-session lock; if a send to the same session is already in
+// flight the lock is held, so this returns ErrBusy rather than spawning a second
+// resume that would race the transcript — matching RemoteRunner.Send's exit-3
+// busy semantics. The lock is released once the child is spawned (the resume is
+// short and append-only), the same trade-off the desktop rbg-agent makes.
+func (l LocalRunner) Send(sess, task string) error {
+	lock, ok, err := session.TryLock(l.lockPath(sess))
+	if err != nil {
+		return fmt.Errorf("local send lock: %w", err)
+	}
+	if !ok {
+		return ErrBusy
+	}
+	defer lock.Unlock()
+
+	args := append([]string{"claude"}, claudecli.ResumeHeadlessArgs(sess, task)...)
+	_, err = l.spawnFn()(args[0], args[1:], l.logPath(sess), l.Dir)
 	if err != nil {
 		return fmt.Errorf("local send spawn: %w", err)
 	}

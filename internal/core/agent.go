@@ -9,6 +9,8 @@ package core
 import (
 	"crypto/rand"
 	"fmt"
+	"path/filepath"
+	"strings"
 )
 
 // Location is which machine an agent runs on. The laptop is just one machine,
@@ -107,6 +109,31 @@ func DeriveSync(hasUpstream bool, behind, ahead int, dirty bool) Sync {
 	default:
 		return Aligned
 	}
+}
+
+// RepoDir resolves a repo identity to the working directory a delegated task
+// runs in on its machine. An absolute path (or ~-relative, expanded against
+// home) is used verbatim; a bare name or git URL maps to <base>/<repo-leaf>,
+// where base is the machine's checkout root (e.g. ~/workplace). This is the
+// single place the Repo→Dir convention lives, so Create can stamp Dir at stage
+// time and Run never launches a task with an empty working directory. Returns
+// "" for an empty repo (a repo-less task keeps whatever Dir it was given).
+func RepoDir(base, home, repo string) string {
+	if repo == "" {
+		return ""
+	}
+	if strings.HasPrefix(repo, "~/") {
+		return filepath.Join(home, repo[2:])
+	}
+	if filepath.IsAbs(repo) {
+		return repo
+	}
+	leaf := repo
+	if i := strings.LastIndexAny(leaf, "/:"); i >= 0 {
+		leaf = leaf[i+1:]
+	}
+	leaf = strings.TrimSuffix(leaf, ".git")
+	return filepath.Join(base, leaf)
 }
 
 // ValidSessionID reports whether id is a safe session identifier: non-empty and

@@ -17,9 +17,21 @@ func (e *Engine) Run(name string) error {
 	if !ok {
 		return fmt.Errorf("run: agent %q is not managed (create or adopt it first)", name)
 	}
+	if rec.State == core.Running {
+		// Re-launching would overwrite the live Session/Pid we already recorded,
+		// orphaning the running child (its pid becomes unreachable to Kill). Stop
+		// it first if a fresh run is really wanted.
+		return fmt.Errorf("run: agent %q is already running (kill it first to re-run)", name)
+	}
 	m := e.pick(rec.Where)
 
 	if rec.Repo != "" {
+		if rec.Dir == "" {
+			// A repo-backed agent with no working dir would pull/launch in the
+			// wrong place (e.g. `git -C "" pull`). Create derives Dir; a record
+			// missing it is malformed.
+			return fmt.Errorf("run: agent %q has a repo but no working dir (recreate it)", name)
+		}
 		if err := m.Repo.Pull(rec.Dir); err != nil {
 			return fmt.Errorf("run: sync failed for %q (resolve it, then retry): %w", name, err)
 		}
@@ -30,6 +42,15 @@ func (e *Engine) Run(name string) error {
 		return fmt.Errorf("run: launch %q: %w", name, err)
 	}
 
+	// The runner returns the RESOLVED name it actually launched under. The
+	// desktop rbg-agent dedups a colliding name (foo → foo-2), so if we kept our
+	// original name, later Send/Kill (which key the remote agent by name) would
+	// target an id the desktop doesn't have. Adopt the resolved name, re-keying
+	// the store record when it changed.
+	if res.Name != "" && res.Name != rec.Name {
+		e.store.Delete(rec.Name)
+		rec.Name = res.Name
+	}
 	rec.Session = res.Session
 	rec.Pid = res.Pid
 	rec.State = core.Running
@@ -71,7 +92,14 @@ func (e *Engine) Kill(name string) error {
 	}
 	if a.Where == core.Local {
 		if a.Pid <= 0 {
-			return fmt.Errorf("kill: no recorded pid for local agent %q", name)
+			// Only agents rbg launched locally carry a tracked pid. `claude agents`
+			// exposes neither a pid nor a stop command (verified claude v2.1.197),
+			// so a foreign local agent — or a managed one that never ran — cannot
+			// be stopped through rbg. Say so plainly.
+			if a.IsForeign() {
+				return fmt.Errorf("kill: %q is a foreign local agent; rbg cannot stop agents it did not launch (no pid; claude exposes no stop command)", name)
+			}
+			return fmt.Errorf("kill: no recorded pid for local agent %q (has it run?)", name)
 		}
 		if err := e.killLocal(a.Pid); err != nil {
 			return fmt.Errorf("kill: local agent %q: %w", name, err)
