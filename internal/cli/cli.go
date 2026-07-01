@@ -132,6 +132,9 @@ func doRead(rest []string, ops Ops, out io.Writer) int {
 	return 0
 }
 
+// Usage returns the full command help text.
+func Usage() string { return usage() }
+
 // usage returns the scriptable-verb help text.
 func usage() string {
 	return `rbg — remote Claude agent management
@@ -144,5 +147,14 @@ Commands:
   read <name>              print an agent's transcript
   kill <name>              stop an agent (keeps transcript)
   adopt <name>             manage an agent started outside rbg
+  dash                     open the interactive dashboard (default)
+  deploy                   build & install the agent on the desktop
+  attach <name>            attach interactively (TTY)
+  ping                     check reachability
+  help                     show this help
+
+Configuration (env or ~/.rbg.conf; env wins):
+  RBG_HOST (required), RBG_CWD, RBG_SSH, RBG_AGENT_PATH, RBG_MUX,
+  RBG_CONTROL_PATH, RBG_CONTROL_PERSIST
 `
 }

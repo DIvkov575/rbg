@@ -8,113 +8,113 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/divkov575/rbg/internal/cli"
 	"github.com/divkov575/rbg/internal/client"
 	"github.com/divkov575/rbg/internal/config"
+	"github.com/divkov575/rbg/internal/engine"
 	"github.com/divkov575/rbg/internal/run"
 	"github.com/divkov575/rbg/internal/sshx"
 )
 
-type inv struct {
-	verb   string
-	name   string
-	task   string
-	follow bool
-}
+func main() {
+	args := os.Args[1:]
 
-func parse(args []string) (*inv, error) {
-	// `rbg raw <verb> ...` is the power-user escape hatch: strip the prefix and
-	// parse the remaining verb exactly as before. Bare `rbg` (no args) is dash.
-	if len(args) > 0 && args[0] == "raw" {
-		if len(args) == 1 {
-			return nil, fmt.Errorf("raw requires a verb, e.g. `rbg raw ls`")
-		}
-		args = args[1:]
-	}
-	if len(args) == 0 {
-		return &inv{verb: "dash"}, nil // no args → dashboard
+	if len(args) == 0 || args[0] == "dash" {
+		os.Exit(runDash())
 	}
 	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
-		return &inv{verb: "help"}, nil
-	}
-	in := &inv{verb: args[0]}
-	rest := args[1:]
-	switch in.verb {
-	case "ls", "ping", "deploy", "dash":
-		return in, nil
-	case "launch":
-		switch len(rest) {
-		case 1:
-			in.task = rest[0] // name auto-derived by the agent
-		case 2:
-			in.name, in.task = rest[0], rest[1]
-		default:
-			return nil, fmt.Errorf("launch requires \"<task>\" or <name> \"<task>\"")
-		}
-	case "send":
-		if len(rest) < 2 {
-			return nil, fmt.Errorf("send requires <name> <task>")
-		}
-		in.name, in.task = rest[0], rest[1]
-	case "read":
-		if len(rest) < 1 {
-			return nil, fmt.Errorf("read requires <name>")
-		}
-		in.name = rest[0]
-		for _, a := range rest[1:] {
-			if a == "-f" || a == "--follow" {
-				in.follow = true
-			}
-		}
-	case "attach", "kill":
-		if len(rest) < 1 {
-			return nil, fmt.Errorf("%s requires <name>", in.verb)
-		}
-		in.name = rest[0]
-	default:
-		return nil, fmt.Errorf("unknown verb %q", in.verb)
-	}
-	return in, nil
-}
-
-func main() {
-	in, err := parse(os.Args[1:])
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "rbg: %v\n\n%s", err, usage())
-		os.Exit(2)
-	}
-	if in.verb == "help" {
-		fmt.Print(usage())
+		fmt.Print(cli.Usage())
 		os.Exit(0)
 	}
+	// `raw` prefix accepted and stripped (back-compat).
+	if args[0] == "raw" {
+		args = args[1:]
+		if len(args) == 0 {
+			fmt.Fprintln(os.Stderr, "rbg: raw requires a verb")
+			os.Exit(2)
+		}
+	}
+	verb := args[0]
+	switch verb {
+	case "deploy", "ping", "attach":
+		os.Exit(runLegacy(verb, args[1:]))
+	}
+	if isScriptable(verb) {
+		e, err := buildEngine()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "rbg: %v\n", err)
+			os.Exit(2)
+		}
+		os.Exit(cli.Dispatch(args, e, os.Stdout))
+	}
+	fmt.Fprintf(os.Stderr, "rbg: unknown command %q\n\n%s", verb, cli.Usage())
+	os.Exit(2)
+}
+
+// isScriptable reports whether a verb is handled by the engine-backed CLI.
+func isScriptable(verb string) bool {
+	switch verb {
+	case "ls", "create", "run", "send", "read", "kill", "adopt":
+		return true
+	}
+	return false
+}
+
+// buildEngine loads config and constructs a real Engine over ssh/exec.
+func buildEngine() (*engine.Engine, error) {
+	cfg, err := loadCfg()
+	if err != nil {
+		return nil, err
+	}
+	home, _ := os.UserHomeDir()
+	storePath := filepath.Join(home, ".rbg", "agents.json")
+	return engine.New(cfg, run.Exec{}, storePath, home)
+}
+
+// loadCfg loads config and ensures the ssh control dir when muxing.
+func loadCfg() (*config.Config, error) {
 	cfg, err := config.Load(envMap(), os.ExpandEnv("$HOME/.rbg.conf"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "rbg: %v\n", err)
-		os.Exit(2)
+		return nil, err
 	}
 	if cfg.Mux {
 		ensureControlDir(cfg.ControlPath)
 	}
-	r := run.Exec{}
-	switch in.verb {
-	case "ping":
-		os.Exit(client.Ping(cfg, r, os.Stdout))
-	case "launch":
-		os.Exit(client.Launch(cfg, r, os.Stdout, in.name, in.task))
-	case "send":
-		os.Exit(client.Send(cfg, r, os.Stdout, in.name, in.task))
-	case "read":
-		os.Exit(client.Read(cfg, r, os.Stdout, in.name))
-	case "ls":
-		os.Exit(client.Ls(cfg, r, os.Stdout))
-	case "attach":
-		os.Exit(attach(cfg, r, in.name))
-	case "kill":
-		os.Exit(client.Kill(cfg, r, os.Stdout, in.name))
-	case "deploy":
-		os.Exit(deploy(cfg, r))
-	case "dash":
-		os.Exit(dash(cfg, r))
+	return cfg, nil
+}
+
+// runDash loads config and opens the interactive dashboard (unchanged path).
+func runDash() int {
+	cfg, err := loadCfg()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rbg: %v\n", err)
+		return 2
 	}
+	return dash(cfg, run.Exec{})
+}
+
+// runLegacy dispatches the non-engine verbs (deploy/ping/attach) to their
+// existing handlers.
+func runLegacy(verb string, rest []string) int {
+	cfg, err := loadCfg()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rbg: %v\n", err)
+		return 2
+	}
+	r := run.Exec{}
+	switch verb {
+	case "deploy":
+		return deploy(cfg, r)
+	case "ping":
+		return client.Ping(cfg, r, os.Stdout)
+	case "attach":
+		if len(rest) < 1 {
+			fmt.Fprintln(os.Stderr, "rbg: attach requires <name>")
+			return 2
+		}
+		return attach(cfg, r, rest[0])
+	}
+	return 2
 }
 
 // attach resolves the claude session id from the agent's ls, then drops into an
@@ -139,35 +139,6 @@ func attach(cfg *config.Config, r run.Runner, name string) int {
 	args := sshx.BuildSSHArgs(cfg, []string{"claude", "--resume", id}, sshx.Options{TTY: true})
 	// Interactive: connect to the real terminal.
 	return runInteractive("ssh", args)
-}
-
-// usage returns the full help text (verbs + config), printed by `rbg help`,
-// `-h`/`--help`, and on a parse error.
-func usage() string {
-	return `rbg — remote Claude agent management
-
-Usage:
-  rbg                      open the dashboard (default)
-  rbg raw <command> ...    run a single operation (scripting)
-  rbg help                 show this help
-
-Dashboard (no args): browse/launch/kill agents, queue tasks, edit config.
-
-raw commands:
-  raw launch "<task>"          launch an agent (name auto-derived)
-  raw launch <name> "<task>"   launch with an explicit name
-  raw send <name> "<task>"     send a follow-up task
-  raw read <name>              print an agent's transcript
-  raw ls                       list agents
-  raw kill <name>              forget an agent (keep transcript)
-  raw attach <name>            attach interactively (TTY)
-  raw ping                     check reachability
-  raw deploy                   build & install the agent on the desktop
-
-Configuration (env, or ~/.rbg.conf as KEY=value; env wins):
-  RBG_HOST (required), RBG_CWD, RBG_SSH, RBG_AGENT_PATH,
-  RBG_MUX, RBG_CONTROL_PATH, RBG_CONTROL_PERSIST
-`
 }
 
 // ensureControlDir creates the parent directory of the SSH ControlPath socket,
