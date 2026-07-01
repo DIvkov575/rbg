@@ -69,3 +69,44 @@ func TestListPropagatesDegradationError(t *testing.T) {
 		t.Errorf("expected a degradation error when a source fails")
 	}
 }
+
+func TestCreateStagesHeldRecord(t *testing.T) {
+	e := newTestEngine(t, machine{Source: fakeSource{}}, machine{Source: fakeSource{}})
+	got, err := e.Create(core.Agent{
+		Name: "later", Repo: "git@github:me/app", Dir: "/home/me/app",
+		Task: "refactor the parser", Where: core.Remote,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got.State != core.Held || got.Origin != core.Managed {
+		t.Errorf("created agent = %+v, want Held+Managed", got)
+	}
+	if got.Task != "refactor the parser" || got.Where != core.Remote {
+		t.Errorf("created agent lost fields: %+v", got)
+	}
+	rec, ok := e.store.Get("later")
+	if !ok || rec.State != core.Held {
+		t.Errorf("held record not persisted: %+v ok=%v", rec, ok)
+	}
+}
+
+func TestCreateRejectsBlankTaskAndName(t *testing.T) {
+	e := newTestEngine(t, machine{}, machine{})
+	if _, err := e.Create(core.Agent{Name: "x", Task: ""}); err == nil {
+		t.Errorf("blank task should error (no blank agents)")
+	}
+	if _, err := e.Create(core.Agent{Name: "", Task: "t"}); err == nil {
+		t.Errorf("blank name should error")
+	}
+}
+
+func TestCreateRejectsDuplicateName(t *testing.T) {
+	e := newTestEngine(t, machine{}, machine{})
+	if _, err := e.Create(core.Agent{Name: "dup", Task: "t"}); err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+	if _, err := e.Create(core.Agent{Name: "dup", Task: "u"}); err == nil {
+		t.Errorf("duplicate name should error")
+	}
+}
