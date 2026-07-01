@@ -190,3 +190,23 @@ func TestAdoptUnknownErrors(t *testing.T) {
 		t.Errorf("adopting an unknown agent should error")
 	}
 }
+
+func TestReadSucceedsWhenOtherMachineDegraded(t *testing.T) {
+	// The remote probe fails, but the requested agent lives locally. find/Read
+	// must resolve it from the still-usable inventory and NOT surface the
+	// remote's degradation error, since the agent was found.
+	e := newTestEngine(t,
+		machine{
+			Source: fakeSource{live: []core.Live{{SessionID: "L1", Name: "loc", Cwd: "/x", State: "working"}}},
+			Tx:     fakeTx{data: []byte("local transcript")},
+		},
+		machine{Source: fakeSource{err: errors.New("desktop unreachable")}},
+	)
+	data, err := e.Read("loc")
+	if err != nil {
+		t.Fatalf("Read should succeed for a found local agent despite remote degradation: %v", err)
+	}
+	if string(data) != "local transcript" {
+		t.Errorf("Read = %q, want the local transcript", data)
+	}
+}
