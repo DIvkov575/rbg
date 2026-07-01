@@ -6,6 +6,11 @@
 // reading/writing its own JSON store file, so it is fully unit-testable.
 package core
 
+import (
+	"crypto/rand"
+	"fmt"
+)
+
 // Location is which machine an agent runs on. The laptop is just one machine,
 // so local and remote delegation are the same operation with a different Where.
 type Location string
@@ -67,3 +72,15 @@ func (a Agent) IsHeld() bool { return a.State == Held }
 
 // IsForeign reports whether the agent was started outside rbg.
 func (a Agent) IsForeign() bool { return a.Origin == Foreign }
+
+// NewSessionID returns a fresh v4-ish UUID (crypto/rand), formatted 8-4-4-4-12
+// and lowercase-hex — glob- and shell-safe. rbg generates the session id BEFORE
+// launching claude (claude -p --session-id <id>), so the launched agent's record
+// can carry the id and Reconcile can match the record to the live session later.
+func NewSessionID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
