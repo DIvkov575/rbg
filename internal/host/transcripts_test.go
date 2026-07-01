@@ -123,3 +123,57 @@ func TestRemoteTranscriptsReadNonZeroErrors(t *testing.T) {
 		t.Errorf("expected error on non-zero cat exit")
 	}
 }
+
+// stubTx is a canned Transcripts for caching tests.
+type stubTx struct {
+	data []byte
+	err  error
+}
+
+func (s stubTx) Read(session string) ([]byte, error) { return s.data, s.err }
+
+func TestCachingTranscripts_CachesOnSuccess(t *testing.T) {
+	home := t.TempDir()
+	sid := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	c := CachingTranscripts{Inner: stubTx{data: []byte("live bytes")}, Home: home}
+
+	got, err := c.Read(sid)
+	if err != nil || string(got) != "live bytes" {
+		t.Fatalf("Read = %q, %v; want live bytes", got, err)
+	}
+	// the bytes must have been mirrored to the local cache
+	cached, err := readMirror(home, sid)
+	if err != nil || string(cached) != "live bytes" {
+		t.Errorf("cache not written: %q, %v", cached, err)
+	}
+}
+
+func TestCachingTranscripts_FallsBackToCacheOnFailure(t *testing.T) {
+	home := t.TempDir()
+	sid := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	// prime the cache from a prior successful read
+	if _, err := SaveMirror(home, sid, []byte("cached copy")); err != nil {
+		t.Fatal(err)
+	}
+	// now the remote read fails (desktop unreachable)
+	c := CachingTranscripts{Inner: stubTx{err: errStub("host down")}, Home: home}
+	got, err := c.Read(sid)
+	if err != nil {
+		t.Fatalf("expected cache fallback, got error %v", err)
+	}
+	if string(got) != "cached copy" {
+		t.Errorf("Read = %q, want cached copy", got)
+	}
+}
+
+func TestCachingTranscripts_SurfacesErrorOnCacheMiss(t *testing.T) {
+	home := t.TempDir()
+	c := CachingTranscripts{Inner: stubTx{err: errStub("host down")}, Home: home}
+	if _, err := c.Read("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"); err == nil {
+		t.Error("with no cache and a failing read, the live error must surface")
+	}
+}
+
+type errStub string
+
+func (e errStub) Error() string { return string(e) }

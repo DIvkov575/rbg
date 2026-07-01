@@ -97,3 +97,40 @@ func (s RemoteTranscripts) Read(session string) ([]byte, error) {
 }
 
 var _ Transcripts = RemoteTranscripts{}
+
+// CachingTranscripts wraps another Transcripts (typically RemoteTranscripts)
+// with a local on-disk cache under <Home>/.rbg/transcripts. On a successful
+// read it mirrors the bytes to the cache; if the underlying read fails (e.g.
+// the desktop is unreachable) it serves the last-cached copy so a remote
+// conversation stays readable offline. A cache miss on failure surfaces the
+// original error.
+type CachingTranscripts struct {
+	Inner Transcripts
+	Home  string
+}
+
+// Read fetches via Inner, caches on success, and falls back to the mirror on
+// failure. A successful fetch that can't be cached (disk error) is still
+// returned — caching is best-effort and never fails the read.
+func (c CachingTranscripts) Read(session string) ([]byte, error) {
+	data, err := c.Inner.Read(session)
+	if err == nil {
+		_, _ = SaveMirror(c.Home, session, data) // best-effort cache
+		return data, nil
+	}
+	if cached, cerr := readMirror(c.Home, session); cerr == nil {
+		return cached, nil
+	}
+	return nil, err // no cache to fall back to; surface the live error
+}
+
+// readMirror reads a previously-cached transcript from the local mirror. The
+// session id is guarded before use in the path.
+func readMirror(home, session string) ([]byte, error) {
+	if !core.ValidSessionID(session) {
+		return nil, fmt.Errorf("invalid session id %q", session)
+	}
+	return os.ReadFile(filepath.Join(home, ".rbg", "transcripts", session+".jsonl"))
+}
+
+var _ Transcripts = CachingTranscripts{}

@@ -71,8 +71,11 @@ func New(cfg *config.Config, r run.Runner, storePath, home string) (*Engine, err
 			home:      home,
 		},
 		remote: machine{
-			Source:    host.RemoteSource{C: cfg, R: r},
-			Tx:        host.RemoteTranscripts{C: cfg, R: r},
+			Source: host.RemoteSource{C: cfg, R: r},
+			// Cache remote transcripts under the laptop's ~/.rbg/transcripts so a
+			// remote conversation stays readable offline and repeat reads don't
+			// re-SSH. home is the LAPTOP home (where the cache lives), not remoteHome.
+			Tx:        host.CachingTranscripts{Inner: host.RemoteTranscripts{C: cfg, R: r}, Home: home},
 			Repo:      host.RemoteRepo{C: cfg, R: r},
 			newRunner: func(dir string) host.Runner { return host.RemoteRunner{C: cfg, R: r, Dir: dir} },
 			base:      remoteBase,
