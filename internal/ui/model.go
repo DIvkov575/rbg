@@ -123,14 +123,13 @@ func (m *Model) Selected() (core.Agent, bool) {
 	return vis[m.Cursor], true
 }
 
-// listScreen and inputScreen are the two screens; their behavior is added in
-// later tasks. Declared here so the stack (which holds Screens) compiles.
-type listScreen struct{}
-type inputScreen struct{}
-
-func (s *listScreen) Update(m *Model, k Key, r rune) Action { return Action{} }
-func (s *listScreen) View(m *Model) string                  { return "" }
-func (s *listScreen) Hints() string                         { return "" }
+// inputScreen's behavior is added in Task 5; declared here (with the fields it
+// will carry) so the stack and list.go compile. The stub methods are replaced
+// with real bodies in input.go.
+type inputScreen struct {
+	mode   inputMode
+	target string
+}
 
 func (s *inputScreen) Update(m *Model, k Key, r rune) Action { return Action{} }
 func (s *inputScreen) View(m *Model) string                  { return "" }
