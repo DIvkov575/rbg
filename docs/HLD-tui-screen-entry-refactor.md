@@ -1,208 +1,205 @@
-# HLD: TUI Refactor — Screen Interface + Unified Entry Model
+# HLD: TUI Refactor — Screen Interface + Unified Entry Model (`tui-refactor`)
 
 **Date:** 2026-06-30 · **Author:** divkov · **Status:** Design
 
 ## 1. Overview
 
-### 1.1 Problem
-The dashboard integrates three execution systems — **remote agents** (live
-desktop `claude` sessions), **local agents** (persistent, repo-pinned,
-manually re-run), and the **queue** (one-shot staged dispatch). Today they are
-bolted onto a single `Model` struct as ~10 mutually-exclusive-by-convention
-boolean flags (`Input`, `Browsing`, `MakingDir`, `ConfigOpen`, `ConfigEditing`,
-`QueueOpen`, `QueueAdding`, `Previewing`, …). `Update` and `View` are each a
-hand-ordered precedence chain over those flags:
+### 1.1 Background
+The `rbg` dashboard (`internal/tui`) integrates three execution systems:
+- **Remote agents** — live desktop `claude` sessions (`session.Session`).
+- **Local agents** — persistent, repo-pinned, manually re-run (`localagent.Agent`).
+- **Queue** — one-shot staged dispatch (`queue.Item`).
 
+The pure-model pattern (`Update`→Action, `View`→string, loop does I/O) is sound.
+The *composition* of screens is not.
+
+### 1.2 Problem Statement
+- **Screens are ~10 boolean flags on one `Model`** (`Input`, `Browsing`,
+  `MakingDir`, `ConfigOpen`, `ConfigEditing`, `QueueOpen`, `QueueAdding`,
+  `Previewing`, …), mutually exclusive only by convention — nothing structural
+  stops two being true at once.
+- **`Update` and `View` are each a hand-ordered `if m.XOpen {…}` chain**; a new
+  screen edits both, plus adds a bespoke decoder. Verified: **5 parallel
+  `decodeKey*` functions** already exist (`decodeKey`, `decodeKeyInput`,
+  `decodeKeyBrowse`, `decodeKeyConfig`, `decodeKeyQueue`).
+- **The three systems are three parallel data pipelines** with no shared row
+  type, so "show the remote agent and the local agent for the same repo
+  together" has no home.
+
+Adding the requested local / combined / project views on this structure means
+flags #11–#13 in three places each.
+
+### 1.3 Goals
+- Make **"screen" a type**, not scattered booleans — mode becomes structural.
+- Make the **three systems one data population** — the four views are
+  filters/groupings over it.
+- Preserve invariants: **pure model**, **stdlib-only**, **TTY-free unit tests**.
+- Migrate **incrementally** — existing screens keep passing tests throughout.
+
+## 2. Requirements
+
+### 2.1 Functional
+- A `Screen` type owns its own `Update`, `View`, and key hints; `Model` tracks
+  the active screen (a stack, so `esc` pops).
+- A unified `Entry` value represents any agent row; `Kind ∈ {Remote, Local,
+  Queued}`. A pure `buildEntries` assembles `[]Entry` from the three sources.
+- Four views as pure selectors over `[]Entry`: Remote (`Kind==Remote`), Local
+  (`Kind==Local`), Combined (all, sectioned), Project (all, grouped by `Repo`).
+- Per-view actions stay kind-appropriate (remote: attach/kill/read; local:
+  run/edit/delete; queued: dispatch/remove), surfaced via the screen's hints.
+- **ctrl-s** (byte `0x13`) cycles views. Verified reachable: `rawMode` clears
+  `IXON` in both `term_darwin.go` and `term_linux.go`, so `0x13` arrives as a
+  keystroke rather than terminal XOFF.
+
+### 2.2 Out of Scope
+- No third-party deps (no Bubble Tea); the raw-terminal render/IO layer stays.
+- No user-visible behavior change to existing screens — this is structural.
+- No scheduling, no remote↔local process migration.
+
+### Verified facts (observed this session)
+- `session.Session{Name, ClaudeSessionID, TranscriptPath, PID, StartedAt, Dir}`.
+- `localagent.Agent{Name, Repo, Task, LastRun, LastTask}` — package built,
+  tests green.
+- `queue.Item{Prompt, Repo}`.
+- `internal/tui` has tui-local mirrors already (`QueueItem`, `DirItem`,
+  `ConfigField`) — the `Entry`/`LocalAgentItem` types follow that same
+  "mirror in tui, convert in dash.go" precedent, keeping the model free of the
+  `session`/`queue`/`localagent` packages.
+- `cmd/rbg/dash.go` has `dispatchLocal` + `localRepoDir` (fire-and-forget local
+  run) alongside the newer `localagent.Run` (sync-first, tracked) — two local
+  paths (see §5.4).
+
+## 3. Solution Options
+
+**Screen composition —**
+**Option A — more flags.** Keep the boolean-per-screen model; add three more for
+the new views. Zero refactor, but compounds the exact problem (§1.2) and makes
+the flag-exclusivity hazard worse.
+**Option B ★ — `Screen` interface + stack.** Each surface is a small type; the
+central `Update`/`View` chains collapse to `top.Update()`/`top.View()`;
+exclusivity is structural (you're on one screen); `esc`=pop is free. Idiomatic
+Elm/Bubbletea shape, hand-rolled in stdlib. Larger upfront change, mitigated by
+incremental migration (§5.5).
+
+**Systems integration —**
+**Option A — keep three pipelines**, special-case a "project" join. Works, but
+the join logic is bespoke and the queue stays an odd sibling.
+**Option B ★ — one `Entry{Kind}` population.** Views become pure
+filters/groupings; project-grouping-by-repo makes remote↔local handoff fall out
+of the data; the queue dissolves into `Kind==Queued`. One row type to test.
+
+## 4. Current State
 ```
-if m.QueueOpen { if m.Previewing {…} if m.QueueAdding {…} … }
-if m.ConfigOpen { if m.ConfigEditing {…} … }
-if m.Browsing { if m.MakingDir {…} … }
-if m.Input { … }
+Model{ Input,Browsing,MakingDir,ConfigOpen,ConfigEditing,QueueOpen,QueueAdding,Previewing,... }
+                              │
+      Update(m,k):  if QueueOpen{if Previewing…if Adding…} if ConfigOpen{…} if Browsing{…} if Input{…}
+      View(m):      if QueueOpen{…} if ConfigOpen{…} if Browsing{…} ...           (chain repeated)
+      decode:       decodeKey / decodeKeyInput / decodeKeyBrowse / decodeKeyConfig / decodeKeyQueue
+
+ data:  Fetch()→[]session.Session   LoadQueue()→[]queue.Item   (local: untracked, not in the list)
+        └── three separate render paths; no shared row; no place for "same repo, both kinds"
+```
+Each feature this session (queue, config, preview, dir-browser) added a flag +
+two branches + a decoder. The next three views would triple that.
+
+## 5. Design Proposal
+
+### 5.1 Architecture
+```
+ sources (I/O in the loop, via Deps)         pure model
+ ───────────────────────────────────        ─────────────────────────────────
+ Deps.Fetch()     → []session.Session ┐
+ Deps.LocalList() → []LocalAgentItem  ├─ buildEntries() → []Entry ─→ Screen.View
+ Deps.LoadQueue() → []QueueItem       ┘        (pure)      (filter/group by view)
+                                                                 │ Key
+ loop fulfills Action ◄──────────────────── Screen.Update ◄──────┘
+ (attach/kill/run/dispatch/create/…)         (pure → next Screen, Action)
 ```
 
-Consequences that have made every recent feature harder:
-- **Exclusivity is hoped-for, not enforced.** Nothing structurally prevents two
-  screen flags being true at once; correctness relies on remembering to unset
-  the previous one.
-- **A new screen touches three places** — a flag, an `Update` branch, a `View`
-  branch — plus a bespoke `decodeKey*` function. Adding the planned local /
-  combined / project views this way means flags #11–#13.
-- **The three systems are three parallel data pipelines.** Remote sessions,
-  local agents, and queue items each have their own fetch/render path, so
-  "show the remote agent and the local agent for the same repo together" has no
-  natural home.
-
-### 1.2 Goals
-- Make **"screen" a first-class type**, so navigation state is structural
-  (you are on exactly one screen) rather than a bag of booleans.
-- Make the **three systems one data model**, so the four views (remote / local /
-  combined / project) are *filters/groupings over a single population*, not
-  separate pipelines.
-- Preserve the project's invariants: **pure model** (no I/O in `Update`/`View`),
-  **stdlib-only**, **fully unit-testable without a TTY**.
-- Migrate **incrementally** — existing working screens keep passing tests
-  throughout; no big-bang rewrite.
-
-### 1.3 Non-goals
-- No new third-party deps (no Bubble Tea — we keep the hand-rolled raw-terminal
-  layer; this refactor is about *structure*, not the render/IO substrate).
-- No behavior change to existing screens as observed by the user. This is a
-  structural refactor; features ride on top of it (separate plan).
-- No scheduling, no remote↔local process migration (out of scope here).
-
-## 2. Design
-
-### 2.1 Concern separation
-Two tangled concerns are separated:
-
-- **(A) Navigation / mode** → a `Screen` interface + a screen stack.
-- **(B) The three systems** → a unified `Entry` value that all views render.
-
-They are independent: (A) fixes "how do modes compose", (B) fixes "how do the
-systems integrate". Either is useful alone; together they make the four views
-nearly free.
-
-### 2.2 (A) Screen interface
-
+### 5.2 `Screen` interface
 ```go
-// Screen is one interactive surface (agents list, queue, config, dir-browser,
-// preview, …). Pure: Update returns an Action for the loop to fulfill; no I/O.
 type Screen interface {
-    Update(m *Model, k Key) (Screen, Action) // returns the next screen (self, a
-                                             // pushed child, or nil to pop)
+    Update(m *Model, k Key) (Screen, Action) // next screen: self, a pushed child, or nil=pop
     View(m *Model, w, h int) string
-    Hints() string                           // footer key-hints for this screen
+    Hints() string                            // footer key-hints for this screen
 }
 ```
+`Model` holds a stack `[]Screen`. `Update` → `top.Update(...)` then apply the
+transition (push/replace/pop); `View` → `top.View(...)`. Text-entry sub-modes
+(task input, dir-name, config-edit) become small **child screens** pushed on the
+stack — replacing today's nested booleans. Each screen decodes its own keys via
+a shared helper library, retiring the parallel `decodeKey*` family.
 
-`Model` holds a **screen stack** `[]Screen` (top = active). This gives `esc`
-= pop for free (preview → back to queue; making-dir → back to browser), which
-today is manual flag juggling.
-
-`Update` collapses from the precedence chain to:
-
-```go
-func Update(m Model, k Key) (Model, Action) {
-    top := m.stack[len(m.stack)-1]
-    next, act := top.Update(&m, k)
-    m.applyTransition(next) // push / replace / pop
-    return m, act
-}
-```
-
-`View` collapses to `m.top().View(&m, w, h)`. Adding a screen = implement the
-interface + push it; **no edits to a central switch**.
-
-Key decoding also moves per-screen: each `Screen` interprets raw keys itself
-(via a shared `decode` helper library), removing the parallel `decodeKeyQueue` /
-`decodeKeyBrowse` / `decodeKeyConfig` family in favor of the screen owning its
-own key semantics. Text-entry sub-modes (task input, dir-name, config-edit)
-become small child screens pushed on the stack rather than nested booleans.
-
-### 2.3 (B) Unified Entry model
-
+### 5.3 Unified `Entry` model
 ```go
 type Kind int
 const ( KindRemote Kind = iota; KindLocal; KindQueued )
 
-// Entry is the unified row every agent-oriented view renders. Kind-specific
-// data hangs off the typed pointers; nil for the others.
 type Entry struct {
-    Name   string
-    Repo   string   // grouping key for project view
-    Status string   // human status ("running","idle","done","staged","last run 3m")
+    Name, Repo, Status string
     Kind   Kind
-    remote *session.Session   // when KindRemote
-    local  *LocalAgentItem    // when KindLocal
-    queued *QueueItem         // when KindQueued
+    remote *session.Session   // set iff KindRemote (via tui mirror)
+    local  *LocalAgentItem    // set iff KindLocal
+    queued *QueueItem         // set iff KindQueued
 }
 ```
+`buildEntries(remote, local, queued) []Entry` is a pure combiner. Views:
 
-A single `entries []Entry` is assembled from the three sources (remote fetch,
-local-agent list, queue). The four views are pure functions over it:
-
-| View | Selector |
+| View | Selector over `[]Entry` |
 |---|---|
 | Remote | `Kind==KindRemote` |
 | Local | `Kind==KindLocal` |
 | Combined | all, sectioned by `Kind` |
 | Project | all, grouped by `Repo` |
 
-**Project view is where integration becomes visible**: grouping by `Repo`
-places the remote agent working `mymemories` and the local agent pinned to it in
-the same group — the "remote finishes → run local" workflow falls out of the
-data model instead of being special-cased. The **queue dissolves** into
-`KindQueued` entries: no longer a separate concept, just one more source.
+**Project view is the integration point:** grouping by `Repo` places the remote
+agent working a repo and the local agent pinned to it in one group — so "remote
+finishes → run local" is visible in the data, not special-cased. It is also a
+**launcher**: selecting a project dispatches a new session (local/remote toggle).
 
-Per-view *actions* remain kind-appropriate (remote: attach/kill/read; local:
-run/edit/delete; queued: dispatch/remove) — the view knows an entry's `Kind` and
-offers the right verbs, surfaced via `Hints()`.
+### 5.4 Related: unify the local-run path
+`dispatchLocal` (fire-and-forget, no sync, untracked) and `localagent.Run`
+(sync-first, tracked) both "run a task locally in a repo." Collapse to one: route
+the queue's local dispatch through `localagent.Run`, delete `dispatchLocal`. One
+code path, one behavior. This is the genuine *refactor* in the request; lands in
+the same slice as the seam.
 
-### 2.4 Data flow
+### 5.5 Migration (incremental; tests green each step)
+1. **Add the seam, convert nothing** — `Screen`, `Entry`, `buildEntries` as new
+   tested types. No existing screen changes. (Proves the shape, as the
+   `localagent` core was proven before wiring.)
+2. **Build the new views natively** as `Screen`s on `Entry` (local / combined /
+   project). No legacy to preserve.
+3. **Convert legacy screens as touched** — queue, config, dir-browser, preview
+   become `Screen`s, one per commit, because they now read from `entries`.
+4. **Delete the flag chain** in a final cleanup commit once all are converted.
 
-```
- sources (I/O, in the loop via Deps)        pure model
- ─────────────────────────────────         ──────────────────────────
- Deps.Fetch()      → []session.Session ┐
- Deps.LocalList()  → []LocalAgentItem  ├─→ buildEntries() → []Entry ─→ Screen.View
- Deps.LoadQueue()  → []QueueItem       ┘         (pure)               (filter/group)
-                                                                        │ Key
- loop fulfills Action ←──────────────────── Screen.Update ←────────────┘
- (attach/kill/run/dispatch/…)                (pure, returns Action)
-```
+Maps to the two slices: **Slice 1** = seam + `Entry` + unify local-run (§5.4) +
+ctrl-s + `raw local` verbs; **Slice 2** = the four views + legacy conversion.
 
-The loop (`run.go`) still owns all I/O and fulfills `Action`s; the model stays
-pure. `buildEntries` is a pure combiner — trivially unit-tested.
+### 5.6 Data-model compatibility
+No on-disk format changes. `Entry` and `LocalAgentItem` are in-memory tui types
+built from existing stores (`~/.rbg/local-agents.json`, the queue store, remote
+`ls`). Backward-compatible by construction.
 
-## 3. Migration strategy (incremental, tests green throughout)
+## 6. Design Analysis
 
-Big-bang rewrites of working TUI code are the risk. Instead:
+### 6.1 Key Improvements
+- New screen = one type, not three edits + a decoder.
+- Screen exclusivity is structural; `esc`=pop is free.
+- One row type → four views are pure one-liners; project view makes the
+  remote↔local handoff legible; the queue stops being a special case.
+- One local-run path instead of two divergent ones.
 
-1. **Introduce the seam, don't convert yet.** Add `Screen`/`Entry`/`buildEntries`
-   as new types with their own tests. No existing screen changes. (Proves the
-   shape, like the `localagent` core was proven before wiring.)
-2. **Build the NEW views natively as `Screen`s** on the `Entry` model
-   (local / combined / project). These have no legacy to preserve.
-3. **Convert existing screens opportunistically** — queue, config, dir-browser,
-   preview — into `Screen`s *as we touch them* for the unified data, one per
-   commit, each keeping its tests green. Not a separate rewrite; it happens
-   because they now read from `entries`.
-4. **Delete the flag chain** once the last screen is converted; the boolean
-   fields and the `Update`/`View` precedence chains go away in a final cleanup
-   commit.
-
-This maps onto the two-slice plan: **Slice 1** introduces the seam + `Entry` +
-the foundation (and unifies the local-run path — see §5); **Slice 2** builds the
-views as `Screen`s and converts the legacy screens.
-
-## 4. Testing
-- `buildEntries`, per-view selectors/grouping: pure table tests over synthetic
-  sources — no TTY, no SSH.
-- Each `Screen`'s `Update`: feed keys, assert (next-screen, Action) — the pure
-  discipline already in place.
-- Stack transitions (push/replace/pop, `esc` pops): unit-tested on `Model`.
-- The raw-terminal loop stays integration/manual as today.
-
-## 5. Related refactor: unify the local-run path
-Orthogonal but landing in the same slice: today `cmd/rbg/dash.go`'s
-`dispatchLocal` (fire-and-forget, no sync, untracked) and the new
-`localagent.Run` (sync-first, tracked) are two ways to "run locally". Collapse
-to one — route the queue's local dispatch through `localagent.Run` and delete
-`dispatchLocal` — so there is a single local-run code path. (Detailed in the
-local-agents plan.)
-
-## 6. Risks
+### 6.2 Risks
 | Risk | Mitigation |
 |---|---|
-| Refactor regresses working screens | Incremental conversion, one screen/commit, tests green each step; delete flags only after all converted |
-| `Screen` stack over-engineered for simple screens | Screens are tiny structs; the interface is 3 methods; text sub-modes as child screens are simpler than the current nested booleans |
-| `Entry`'s typed pointers leak kind-logic into views | Views branch only on `Kind` + call accessors; keep kind-specific rendering in small per-kind helpers |
-| Scope creep (refactor + features at once) | Two slices: seam+foundation first (mergeable alone), views second |
+| Refactor regresses working screens | Incremental (§5.5), one screen/commit, tests green each step; delete flags only after all converted |
+| `Screen` stack over-built for trivial screens | Screens are tiny structs; 3-method interface; child-screen sub-modes are simpler than nested booleans |
+| `Entry` typed pointers leak kind-logic into views | Views branch only on `Kind` + call accessors; kind-specific rendering isolated in small helpers |
+| Doing refactor + features at once | Two slices; Slice 1 (seam + unify) is mergeable on its own before any view work |
 
-## 7. Decisions captured
-- **View cycling:** `ctrl-s` (byte `0x13`, reaches the app because `rawMode`
-  clears `IXON`) cycles remote → local → combined → project. (User decision.)
-- **Project view = launcher-and-lens:** groups existing agents by repo AND lets
-  you select a project to dispatch a new session (local/remote). (User decision.)
-- **Delivery:** two slices — foundation/seam/unify first, views second.
-  (User decision.)
+### 6.3 Decisions captured
+- **ctrl-s** cycles remote → local → combined → project (user).
+- **Project view = launcher + lens** (user).
+- **Two-slice delivery**: seam/foundation/unify first, views second (user).
