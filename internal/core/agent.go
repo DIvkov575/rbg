@@ -91,6 +91,8 @@ func NewSessionID() string {
 // commit divergence; without an upstream, ahead/behind is unknowable so the
 // state is SyncUnknown (unless dirty). When an upstream exists and the tree is
 // clean: behind (needs a pull before running) outranks ahead, else Aligned.
+// This is a single-enum summary: while dirty, ahead/behind divergence is not
+// surfaced (resolve the working tree first); callers needing both must re-query.
 func DeriveSync(hasUpstream bool, behind, ahead int, dirty bool) Sync {
 	switch {
 	case dirty:
