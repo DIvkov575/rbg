@@ -88,3 +88,44 @@ func TestSyncBadge(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectCursorMarksSelectedAgent(t *testing.T) {
+	m := viewModel(ViewProject)
+	// Selected() must agree with the marked row across the group reordering.
+	for i := 0; i < len(m.Visible()); i++ {
+		m.Cursor = i
+		sel, ok := m.Selected()
+		if !ok {
+			t.Fatalf("cursor %d: no selection", i)
+		}
+		out := renderList(m)
+		// the marked ("> ") line must contain the selected agent's name.
+		var marked string
+		for _, ln := range strings.Split(out, "\n") {
+			if strings.HasPrefix(ln, "> ") {
+				marked = ln
+			}
+		}
+		if !strings.Contains(marked, sel.Name) {
+			t.Errorf("project cursor %d: marked line %q does not contain Selected() %q\n%s", i, marked, sel.Name, out)
+		}
+	}
+}
+
+func TestCombinedCursorMarksSelectedAgent(t *testing.T) {
+	m := viewModel(ViewCombined)
+	for i := 0; i < len(m.Visible()); i++ {
+		m.Cursor = i
+		sel, _ := m.Selected()
+		out := renderList(m)
+		var marked string
+		for _, ln := range strings.Split(out, "\n") {
+			if strings.HasPrefix(ln, "> ") {
+				marked = ln
+			}
+		}
+		if !strings.Contains(marked, sel.Name) {
+			t.Errorf("combined cursor %d: marked %q lacks Selected() %q\n%s", i, marked, sel.Name, out)
+		}
+	}
+}

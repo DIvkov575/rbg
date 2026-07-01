@@ -99,18 +99,27 @@ func (m *Model) pop() {
 	}
 }
 
-// Visible returns the agents shown by the current view — the pure lens applied
-// to the inventory. Project/Combined show all (grouping/sectioning is a render
-// concern); Local/Remote filter by machine.
+// Visible returns the agents shown by the current view, IN DISPLAY ORDER — so
+// Cursor indexes the same sequence the renderer draws (and marks). Local/Remote
+// filter by machine; Combined is local-then-remote; Project is the GroupByRepo
+// flattening (group order, agents sorted within each group).
 func (m *Model) Visible() []core.Agent {
 	switch m.View {
 	case ViewLocal:
 		return core.OnMachine(m.Agents, core.Local)
 	case ViewRemote:
 		return core.OnMachine(m.Agents, core.Remote)
-	default: // Combined, Project
-		return m.Agents
+	case ViewCombined:
+		local := core.OnMachine(m.Agents, core.Local)
+		return append(local, core.OnMachine(m.Agents, core.Remote)...)
+	case ViewProject:
+		var out []core.Agent
+		for _, g := range core.GroupByRepo(m.Agents) {
+			out = append(out, g.Agents...)
+		}
+		return out
 	}
+	return m.Agents
 }
 
 // Selected returns the agent under the cursor within the current view, or

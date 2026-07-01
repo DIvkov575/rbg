@@ -40,56 +40,38 @@ func renderRows(m *Model, agents []core.Agent, base int) string {
 	return b.String()
 }
 
-// renderCombined sections the inventory by machine (local then remote). The
-// cursor indexes the concatenation local++remote, matching Visible() order for
-// Combined (which returns all agents in inventory order) — so this renderer
-// re-derives sections but marks by global cursor over the SAME order Visible
-// uses. To keep cursor semantics simple, Combined marks over m.Agents order.
+// renderCombined sections the inventory by machine (local then remote), marking
+// the cursor via renderRows' base offset so Cursor indexes the SAME sequence
+// Visible() returns for Combined (local++remote).
 func renderCombined(m *Model) string {
 	var b strings.Builder
+	local := core.OnMachine(m.Agents, core.Local)
+	remote := core.OnMachine(m.Agents, core.Remote)
 	b.WriteString("LOCAL\n")
-	b.WriteString(renderRowsFiltered(m, core.Local))
+	b.WriteString(renderRows(m, local, 0))
 	b.WriteString("REMOTE\n")
-	b.WriteString(renderRowsFiltered(m, core.Remote))
-	return b.String()
-}
-
-// renderRowsFiltered renders one machine's agents, marking the cursor by the
-// agent's index within m.Visible() (Combined's Visible == m.Agents).
-func renderRowsFiltered(m *Model, where core.Location) string {
-	var b strings.Builder
-	any := false
-	for i, a := range m.Agents {
-		if a.Where != where {
-			continue
-		}
-		any = true
-		marker := "  "
-		if i == m.Cursor {
-			marker = "> "
-		}
-		fmt.Fprintf(&b, "%s%-20s  %-8s  %-8s  %-10s  %s\n",
-			marker, a.Name, a.State, a.Origin, syncBadge(a.Sync), a.Repo)
-	}
-	if !any {
-		b.WriteString("  (none)\n")
-	}
+	b.WriteString(renderRows(m, remote, len(local)))
 	return b.String()
 }
 
 // renderProject groups agents by repo (core.GroupByRepo) with a per-group sync
-// badge (taken from the group's first agent that has a known sync state).
+// badge, marking the cursor via renderRows' base offset so Cursor indexes the
+// GroupByRepo flattening that Visible() returns for Project.
 func renderProject(m *Model) string {
+	groups := core.GroupByRepo(m.Agents)
+	if len(groups) == 0 {
+		return "  (none)\n"
+	}
 	var b strings.Builder
-	for _, g := range core.GroupByRepo(m.Agents) {
+	base := 0
+	for _, g := range groups {
 		repo := g.Repo
 		if repo == "" {
 			repo = "(no repo)"
 		}
 		fmt.Fprintf(&b, "%s  %s\n", repo, groupSyncBadge(g))
-		for _, a := range g.Agents {
-			fmt.Fprintf(&b, "    %-20s  %-7s  %-8s  %-8s\n", a.Name, a.Where, a.State, a.Origin)
-		}
+		b.WriteString(renderRows(m, g.Agents, base))
+		base += len(g.Agents)
 	}
 	return b.String()
 }
