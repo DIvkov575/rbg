@@ -231,17 +231,39 @@ func (m Model) viewPicker() string {
 
 // viewPager renders the transcript.
 func (m Model) viewPager() string {
+	p := m.pager
 	var b strings.Builder
-	b.WriteString(stTitle.Render(m.pager.title) + "\n\n")
-	win := m.pager.window(m.h)
-	end := m.pager.offset + win
-	if end > len(m.pager.lines) {
-		end = len(m.pager.lines)
+
+	// Title bar, with a spinner + word while loading or sending.
+	b.WriteString(stTitle.Render(p.title))
+	if p.loading || p.sending {
+		word := "loading"
+		if p.sending {
+			word = "sending"
+		}
+		frame := spinnerFrames[p.spin%len(spinnerFrames)]
+		b.WriteString("  " + lipgloss.NewStyle().Foreground(cActive).Render(frame) + " " + stHints.Render(word+"…"))
 	}
-	for i := m.pager.offset; i < end; i++ {
-		b.WriteString(m.pager.lines[i] + "\n")
+	b.WriteString("\n\n")
+
+	// Transcript body (pinned to bottom via resolveOffset).
+	win := p.window(m.h)
+	off := p.resolveOffset(m.h)
+	end := off + win
+	if end > len(p.lines) {
+		end = len(p.lines)
 	}
-	b.WriteString("\n" + stHints.Render("j/k scroll · esc/q back"))
+	for i := off; i < end; i++ {
+		b.WriteString(p.lines[i] + "\n")
+	}
+
+	// Status line (errors / "sent" / etc.).
+	if p.status != "" {
+		b.WriteString("\n" + stStatus.Render(p.status))
+	}
+	// Prompt bar for follow-ups.
+	b.WriteString("\n" + stSection.Render("› ") + p.prompt + stHints.Render("▏"))
+	b.WriteString("\n" + stHints.Render("type a follow-up · enter send · ↑/↓ scroll · esc back"))
 	return b.String()
 }
 

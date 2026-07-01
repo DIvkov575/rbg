@@ -7,6 +7,7 @@ package uitea
 
 import (
 	"os/exec"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -54,6 +55,15 @@ type transcriptMsg struct {
 	data []byte
 	err  error
 }
+
+// sentMsg reports a follow-up send from the session view completed.
+type sentMsg struct {
+	name string
+	err  error
+}
+
+// spinTick advances the processing spinner.
+type spinTick struct{}
 
 // Model is the whole dashboard state.
 type Model struct {
@@ -146,6 +156,21 @@ func (m Model) readCmd(name string) tea.Cmd {
 		data, err := ops.Read(name)
 		return transcriptMsg{name: name, data: data, err: err}
 	}
+}
+
+// sendFollowupCmd sends a follow-up from the session view (distinct from the
+// list's sendCmd: it yields a sentMsg so the view re-reads its own transcript
+// rather than refreshing the list).
+func (m Model) sendFollowupCmd(name, task string) tea.Cmd {
+	ops := m.ops
+	return func() tea.Msg {
+		return sentMsg{name: name, err: ops.Send(name, task)}
+	}
+}
+
+// spinCmd schedules the next spinner frame ~every 100ms.
+func spinCmd() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return spinTick{} })
 }
 
 // selected returns the agent under the cursor within the current lens.

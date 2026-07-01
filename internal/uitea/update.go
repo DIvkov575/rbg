@@ -1,6 +1,8 @@
 package uitea
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/divkov575/rbg/internal/core"
@@ -29,12 +31,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.listCmd() // refresh after any mutation
 
 	case transcriptMsg:
-		if msg.err != nil {
-			m.status = "read failed: " + msg.err.Error()
+		// The session view is already open (loading). Fill it, or show the error
+		// on its status line — but only if we're still viewing that agent.
+		if m.mode != modePager || m.pager.agent != msg.name {
 			return m, nil
 		}
-		m.pager = newPager("transcript · "+msg.name, msg.data)
-		m.mode = modePager
+		if msg.err != nil {
+			m.pager.loading = false
+			m.pager.status = "read failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.pager = m.pager.setTranscript(msg.data)
+		return m, nil
+
+	case sentMsg:
+		// A follow-up finished sending; clear the sending state and re-read the
+		// transcript so the new turn appears.
+		if m.mode != modePager || m.pager.agent != msg.name {
+			return m, nil
+		}
+		m.pager.sending = false
+		if msg.err != nil {
+			m.pager.status = "send failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.pager.status = "sent — refreshing…"
+		m.pager.loading = true
+		return m, m.readCmd(msg.name)
+
+	case spinTick:
+		// Advance the spinner only while something is in flight and we're in the
+		// session view; otherwise let it stop (no re-tick).
+		if m.mode == modePager && (m.pager.loading || m.pager.sending) {
+			m.pager.spin = (m.pager.spin + 1) % len(spinnerFrames)
+			return m, spinCmd()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -59,10 +90,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modeInput:
 		return m.keyInput(s, r)
 	case modePager:
-		p, closed := m.pager.key(s, r, m.h)
+		p, act := m.pager.key(s, r, m.h)
 		m.pager = p
-		if closed {
+		switch act {
+		case pagerClose:
 			m.mode = modeList
+			return m, nil
+		case pagerSend:
+			task := strings.TrimSpace(m.pager.prompt)
+			m.pager.prompt = ""
+			m.pager.sending = true
+			m.pager.status = "sending…"
+			return m, tea.Batch(m.sendFollowupCmd(m.pager.agent, task), spinCmd())
 		}
 		return m, nil
 	case modePicker:
@@ -92,12 +131,20 @@ func (m Model) keyList(s string, r rune) (tea.Model, tea.Cmd) {
 	case s == "enter":
 		if a, ok := m.selected(); ok {
 			// A LOCAL conversation opens the real interactive claude client (no
-			// custom render). A remote one falls back to the read-only pager, since
-			// we can't hand a remote TTY to the inline program cleanly.
+			// custom render). A remote one opens the session view IMMEDIATELY in a
+			// loading state and fetches the transcript in the background, so enter
+			// feels instant instead of blocking on the SSH read; a spinner ticks
+			// until it arrives.
 			if a.Where == core.Local && a.Session != "" {
 				return m, m.openClientCmd(a)
 			}
-			return m, m.readCmd(a.Name)
+			if a.Session == "" {
+				m.status = a.Name + " has not run yet (no transcript)"
+				return m, nil
+			}
+			m.pager = newSessionView("session · "+a.Name, a.Name)
+			m.mode = modePager
+			return m, tea.Batch(m.readCmd(a.Name), spinCmd())
 		}
 		return m, nil
 	case s == "rune":

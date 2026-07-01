@@ -92,29 +92,86 @@ func TestStatusMsgTriggersRefresh(t *testing.T) {
 	}
 }
 
-func TestEnterReadsTranscriptAndOpensPager(t *testing.T) {
-	o := &recOps{agents: []core.Agent{remote("job")}, readData: []byte("l1\r\nl2\r\n")}
+func TestEnterOpensSessionViewInstantlyThenFills(t *testing.T) {
+	// A remote agent with a session: enter opens the session view IMMEDIATELY in
+	// a loading state (fast — no blocking read) and fires a read + spinner.
+	a := core.Agent{Name: "job", Where: core.Remote, State: core.Running, Origin: core.Managed, Session: "S1"}
+	o := &recOps{agents: []core.Agent{a}, readData: []byte("l1\r\nl2\r\n")}
 	m := loaded(o)
 	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mm.(Model)
-	if cmd == nil {
-		t.Fatal("enter should return a read command")
-	}
-	msg := cmd()
-	tm, ok := msg.(transcriptMsg)
-	if !ok || tm.name != "job" {
-		t.Fatalf("read cmd should yield transcriptMsg for job, got %#v", msg)
-	}
-	mm, _ = m.Update(tm)
-	m = mm.(Model)
 	if m.mode != modePager {
-		t.Errorf("transcriptMsg should open the pager, mode=%d", m.mode)
+		t.Fatalf("enter should open the session view immediately, mode=%d", m.mode)
 	}
-	// CRLF must be normalized.
+	if !m.pager.loading {
+		t.Error("session view should start in loading state")
+	}
+	if cmd == nil {
+		t.Fatal("enter should fire read + spinner commands")
+	}
+	// The batched command produces a transcriptMsg (and a spinTick); feed the
+	// transcript back to fill the view.
+	m2, _ := m.Update(transcriptMsg{name: "job", data: o.readData})
+	m = m2.(Model)
+	if m.pager.loading {
+		t.Error("transcript arrival should clear loading")
+	}
 	for _, ln := range m.pager.lines {
 		if len(ln) > 0 && ln[len(ln)-1] == '\r' {
 			t.Errorf("pager line has stray CR: %q", ln)
 		}
+	}
+}
+
+func TestSessionViewSendsFollowup(t *testing.T) {
+	a := core.Agent{Name: "job", Where: core.Remote, State: core.Running, Origin: core.Managed, Session: "S1"}
+	o := &recOps{agents: []core.Agent{a}, readData: []byte("hi")}
+	m := loaded(o)
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // open session view
+	m = mm.(Model)
+	m = typeStr(m, "do more") // type into the prompt bar
+	if m.pager.prompt != "do more" {
+		t.Fatalf("prompt bar should capture typing, got %q", m.pager.prompt)
+	}
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // send
+	m = mm.(Model)
+	if !m.pager.sending {
+		t.Error("sending a follow-up should set the sending state")
+	}
+	if m.pager.prompt != "" {
+		t.Error("prompt should clear after send")
+	}
+	if cmd == nil {
+		t.Fatal("send should dispatch a command")
+	}
+	// drain the batch until we see the sentMsg, then confirm Send was called.
+	drainFor(t, cmd, func(msg tea.Msg) bool {
+		_, ok := msg.(sentMsg)
+		return ok
+	})
+	if o.sent != [2]string{"job", "do more"} {
+		t.Errorf("Send got %v, want [job, do more]", o.sent)
+	}
+}
+
+// drainFor runs a (possibly batched) command and asserts some produced message
+// satisfies want. tea.Batch returns a BatchMsg of sub-commands.
+func drainFor(t *testing.T, cmd tea.Cmd, want func(tea.Msg) bool) {
+	t.Helper()
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			if c == nil {
+				continue
+			}
+			if want(c()) {
+				return
+			}
+		}
+		t.Fatal("no batched message satisfied the predicate")
+	}
+	if !want(msg) {
+		t.Fatal("command message did not satisfy the predicate")
 	}
 }
 

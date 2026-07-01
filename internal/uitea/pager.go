@@ -6,19 +6,42 @@ import (
 	"github.com/divkov575/rbg/internal/render"
 )
 
-// pagerModel is a read-only, scrollable transcript view.
+// pagerModel is the remote session view: a scrollable rendered transcript plus
+// a prompt bar for sending follow-ups, a status line, and a processing spinner.
+// It opens instantly (loading=true) and fills when the transcript arrives, so
+// pressing enter feels immediate instead of blocking on the SSH read.
 type pagerModel struct {
-	title  string
-	lines  []string
-	offset int
+	title   string
+	agent   string   // agent name, for sending follow-ups
+	lines   []string // rendered transcript lines
+	offset  int
+	loading bool   // fetching the transcript
+	sending bool   // a follow-up send is in flight
+	status  string // one-line status (errors, "sent", etc.)
+	prompt  string // the prompt-bar buffer
+	spin    int    // spinner frame index
 }
 
-// newPager renders raw claude transcript JSONL into readable conversation lines
-// ("role: text") via render.Line, rather than dumping the raw JSON. Each
-// rendered turn may span multiple display lines (its own text is split on \n),
-// so long turns still scroll naturally. If nothing renders (e.g. an empty or
-// tool-only transcript) it falls back to a placeholder rather than a blank pane.
-func newPager(title string, data []byte) pagerModel {
+// spinnerFrames is a small braille spinner shown while loading/sending.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// newSessionView opens the view for an agent immediately, before the transcript
+// is fetched (loading=true). setTranscript fills it when the data arrives.
+func newSessionView(title, agent string) pagerModel {
+	return pagerModel{title: title, agent: agent, loading: true}
+}
+
+// setTranscript replaces the rendered lines from raw JSONL and clears loading.
+func (p pagerModel) setTranscript(data []byte) pagerModel {
+	p.lines = renderTranscript(data)
+	p.loading = false
+	// keep the view pinned to the bottom (latest turns) on (re)load.
+	p.offset = -1 // sentinel: viewPager clamps -1 to the last page
+	return p
+}
+
+// renderTranscript turns raw claude JSONL into readable "role: text" lines.
+func renderTranscript(data []byte) []string {
 	norm := strings.ReplaceAll(string(data), "\r\n", "\n")
 	var lines []string
 	for _, raw := range strings.Split(norm, "\n") {
@@ -29,12 +52,13 @@ func newPager(title string, data []byte) pagerModel {
 	if len(lines) == 0 {
 		lines = []string{"(no conversation content yet)"}
 	}
-	return pagerModel{title: title, lines: lines}
+	return lines
 }
 
-// window is how many lines fit below the title/hints chrome.
+// window is how many transcript lines fit below the chrome (title + status +
+// prompt bar + hints).
 func (p pagerModel) window(h int) int {
-	n := h - 4
+	n := h - 6
 	if n < 1 {
 		n = 1
 	}
@@ -49,19 +73,50 @@ func (p pagerModel) maxOffset(h int) int {
 	return max
 }
 
-// key scrolls the pager and reports whether Esc/q asked to close it.
-func (p pagerModel) key(s string, r rune, h int) (pagerModel, bool) {
-	switch {
-	case s == "up" || (s == "rune" && r == 'k'):
-		if p.offset > 0 {
-			p.offset--
-		}
-	case s == "down" || (s == "rune" && r == 'j'):
-		if p.offset < p.maxOffset(h) {
-			p.offset++
-		}
-	case s == "esc" || s == "quit" || (s == "rune" && r == 'q'):
-		return p, true // close
+// resolveOffset turns the -1 "pin to bottom" sentinel into a concrete offset.
+func (p pagerModel) resolveOffset(h int) int {
+	if p.offset < 0 {
+		return p.maxOffset(h)
 	}
-	return p, false
+	return p.offset
+}
+
+// pagerAction is what a keystroke asks the enclosing model to do.
+type pagerAction int
+
+const (
+	pagerNone  pagerAction = iota
+	pagerClose             // esc — leave the session view
+	pagerSend              // enter with a non-empty prompt — send p.prompt
+)
+
+// key handles a keystroke in the session view: arrows scroll, printable runes
+// type into the prompt bar, enter sends (if the prompt is non-empty), esc
+// closes. Returns the updated model and the action for the caller to fulfill.
+func (p pagerModel) key(s string, r rune, h int) (pagerModel, pagerAction) {
+	switch s {
+	case "up":
+		o := p.resolveOffset(h)
+		if o > 0 {
+			p.offset = o - 1
+		}
+	case "down":
+		o := p.resolveOffset(h)
+		if o < p.maxOffset(h) {
+			p.offset = o + 1
+		}
+	case "esc":
+		return p, pagerClose
+	case "enter":
+		if strings.TrimSpace(p.prompt) != "" {
+			return p, pagerSend
+		}
+	case "backspace":
+		if n := len(p.prompt); n > 0 {
+			p.prompt = p.prompt[:n-1]
+		}
+	case "rune":
+		p.prompt += string(r)
+	}
+	return p, pagerNone
 }
