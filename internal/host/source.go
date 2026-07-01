@@ -6,6 +6,7 @@
 package host
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -60,8 +61,14 @@ func (s RemoteSource) List() ([]core.Live, error) {
 	return parseLive(out)
 }
 
-// parseLive decodes a `claude agents --json` array into []core.Live.
+// parseLive decodes a `claude agents --json` array into []core.Live. Empty or
+// whitespace-only output is treated as an empty list: the documented contract
+// is that --json always prints an array, but guarding here means a distribution
+// that prints nothing for zero agents reports "no agents" rather than an error.
 func parseLive(out []byte) ([]core.Live, error) {
+	if len(bytes.TrimSpace(out)) == 0 {
+		return nil, nil
+	}
 	var live []core.Live
 	if err := json.Unmarshal(out, &live); err != nil {
 		return nil, fmt.Errorf("parse claude agents json: %w", err)

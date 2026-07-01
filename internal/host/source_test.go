@@ -67,6 +67,19 @@ func TestLocalSourceBadJSONErrors(t *testing.T) {
 	}
 }
 
+func TestLocalSourceEmptyOutputIsEmptyList(t *testing.T) {
+	for _, out := range []string{"", "   ", "\n\t "} {
+		r := &run.Recording{Default: run.Result{Stdout: []byte(out), Code: 0}}
+		live, err := LocalSource{R: r}.List()
+		if err != nil {
+			t.Errorf("empty output %q: unexpected error %v", out, err)
+		}
+		if len(live) != 0 {
+			t.Errorf("empty output %q: got %d agents, want 0", out, len(live))
+		}
+	}
+}
+
 func TestRemoteSourceRunsClaudeOverSSH(t *testing.T) {
 	cfg := &config.Config{Host: "desktop", Mux: false}
 	r := &run.Recording{Default: run.Result{Stdout: []byte(agentsPayload), Code: 0}}
