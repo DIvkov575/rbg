@@ -2,6 +2,7 @@ package host
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/divkov575/rbg/internal/core"
@@ -65,6 +66,27 @@ func TestInventoryDegradesWhenRemoteFails(t *testing.T) {
 	}
 	if !names["keep"] || !names["loc"] {
 		t.Errorf("degraded inventory should still contain keep + loc, got %+v", agents)
+	}
+}
+
+func TestInventoryBothFailStillReturnsRecords(t *testing.T) {
+	// Total failure: both machines unreachable. The records-only inventory must
+	// still come back (usable), and the error must aggregate BOTH failures.
+	records := []core.Agent{{Name: "keep", State: core.Held, Origin: core.Managed, Task: "t"}}
+	local := fakeSource{err: errors.New("local down")}
+	remote := fakeSource{err: errors.New("remote down")}
+
+	agents, err := Inventory(records, local, remote)
+	if err == nil {
+		t.Fatalf("expected a non-nil error when both sources fail")
+	}
+	// errors.Join renders one error per line — both failures must be present.
+	msg := err.Error()
+	if !strings.Contains(msg, "local down") || !strings.Contains(msg, "remote down") {
+		t.Errorf("joined error missing a source failure: %q", msg)
+	}
+	if len(agents) != 1 || agents[0].Name != "keep" {
+		t.Errorf("records-only inventory should survive total failure, got %+v", agents)
 	}
 }
 
