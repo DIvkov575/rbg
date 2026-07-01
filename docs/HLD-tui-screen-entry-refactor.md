@@ -1,5 +1,8 @@
 # HLD: TUI Refactor — Screen Interface + Unified Entry Model (`tui-refactor`)
 
+> **Superseded by `HLD-rbg-unified-architecture.md`** as the forward plan; kept for detail/history.
+
+
 **Date:** 2026-06-30 · **Author:** divkov · **Status:** Design
 
 ## 1. Overview

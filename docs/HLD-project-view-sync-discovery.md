@@ -1,5 +1,8 @@
 # HLD: Project View, Transcript Sync & Foreign-Agent Discovery (`project-sync`)
 
+> **Superseded by `HLD-rbg-unified-architecture.md`** as the forward plan; kept for detail/history.
+
+
 **Date:** 2026-06-30 · **Author:** divkov · **Status:** Design
 **Builds on:** `docs/HLD-tui-screen-entry-refactor.md` (Screen interface + unified `Entry` model).
 
