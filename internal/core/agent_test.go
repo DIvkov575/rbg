@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +51,43 @@ func TestIsForeign(t *testing.T) {
 	m := Agent{Origin: Managed}
 	if m.IsForeign() {
 		t.Errorf("Origin=Managed: IsForeign()=true, want false")
+	}
+}
+
+func TestNewSessionIDShapeAndUniqueness(t *testing.T) {
+	a := NewSessionID()
+	b := NewSessionID()
+	if a == b {
+		t.Errorf("two ids collided: %q", a)
+	}
+	// v4-ish UUID: 36 chars, 5 dash-separated groups of 8-4-4-4-12.
+	if len(a) != 36 {
+		t.Fatalf("len(%q) = %d, want 36", a, len(a))
+	}
+	groups := strings.Split(a, "-")
+	wantLens := []int{8, 4, 4, 4, 12}
+	if len(groups) != 5 {
+		t.Fatalf("got %d groups in %q, want 5", len(groups), a)
+	}
+	for i, g := range groups {
+		if len(g) != wantLens[i] {
+			t.Errorf("group %d = %q (len %d), want len %d", i, g, len(g), wantLens[i])
+		}
+		for _, r := range g {
+			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+				t.Errorf("group %d %q has non-hex rune %q", i, g, r)
+			}
+		}
+	}
+	// v4-ness: the 13th char (group[2][0]) must be '4' (version), and
+	// group[3][0] must be one of 8,9,a,b (variant) — the two nibbles the
+	// bit-masking sets. Guards against a regression dropping the masks.
+	if groups[2][0] != '4' {
+		t.Errorf("version nibble = %q, want '4' (not a v4 UUID)", groups[2][0])
+	}
+	switch groups[3][0] {
+	case '8', '9', 'a', 'b':
+	default:
+		t.Errorf("variant nibble = %q, want one of 8/9/a/b", groups[3][0])
 	}
 }
