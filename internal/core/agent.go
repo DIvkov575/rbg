@@ -107,3 +107,20 @@ func DeriveSync(hasUpstream bool, behind, ahead int, dirty bool) Sync {
 		return Aligned
 	}
 }
+
+// ValidSessionID reports whether id is a safe session identifier: non-empty and
+// matching ^[A-Za-z0-9-]+$. rbg interpolates session ids into glob patterns and
+// (for remote transcript reads) into a remote shell command string, so any id
+// used there MUST pass this guard first — it admits only characters that are
+// inert to globbing and shell parsing, preventing injection.
+func ValidSessionID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, r := range id {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-') {
+			return false
+		}
+	}
+	return true
+}
