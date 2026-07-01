@@ -4,9 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
+	"github.com/divkov575/rbg/internal/agent"
+	"github.com/divkov575/rbg/internal/claudecli"
 	"github.com/divkov575/rbg/internal/config"
+	"github.com/divkov575/rbg/internal/core"
 	"github.com/divkov575/rbg/internal/run"
+	"github.com/divkov575/rbg/internal/slug"
 	"github.com/divkov575/rbg/internal/sshx"
 )
 
@@ -101,3 +107,68 @@ func (s RemoteRunner) Kill(name string) error {
 }
 
 var _ Runner = RemoteRunner{}
+
+// LocalRunner runs agents on the laptop by spawning detached headless claude,
+// mirroring the remote path: it generates the session id client-side so the
+// record can carry it, and derives a name from the task when none is given.
+type LocalRunner struct {
+	// Spawn starts a detached child; defaults to agent.DefaultSpawn. Injectable
+	// for tests. stdoutPath is where the child's stdout is logged.
+	Spawn agent.SpawnFunc
+	// Dir is the working directory claude runs in ("" = process default).
+	Dir string
+	// LogDir is where a launched child's stdout log is written ("" = os.TempDir).
+	LogDir string
+}
+
+func (l LocalRunner) spawnFn() agent.SpawnFunc {
+	if l.Spawn != nil {
+		return l.Spawn
+	}
+	return agent.DefaultSpawn
+}
+
+// logPath returns where a session's stdout log goes. claude keeps its own
+// transcript on disk; this is only the child's stdout capture.
+func (l LocalRunner) logPath(session string) string {
+	dir := l.LogDir
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, "rbg-"+session+".log")
+}
+
+// Launch starts a new local agent: derive a name (slug from task if empty),
+// generate a session id, and spawn detached headless claude with it.
+func (l LocalRunner) Launch(name, task string) (RunResult, error) {
+	if name == "" {
+		name = slug.FromTask(task)
+	}
+	session := core.NewSessionID()
+	args := append([]string{"claude"}, claudecli.LaunchHeadlessArgs(session, task)...)
+	_, err := l.spawnFn()(args[0], args[1:], l.logPath(session), l.Dir)
+	if err != nil {
+		return RunResult{}, fmt.Errorf("local launch spawn: %w", err)
+	}
+	return RunResult{Name: name, Session: session}, nil
+}
+
+// Send continues a local claude session (identified by its session id) with a
+// follow-up task, by spawning a detached headless resume.
+func (l LocalRunner) Send(session, task string) error {
+	args := append([]string{"claude"}, claudecli.ResumeHeadlessArgs(session, task)...)
+	_, err := l.spawnFn()(args[0], args[1:], l.logPath(session), l.Dir)
+	if err != nil {
+		return fmt.Errorf("local send spawn: %w", err)
+	}
+	return nil
+}
+
+// Kill stops a local agent. Local process tracking (pid → kill) lives in the
+// Store/CLI layer, so this returns a clear not-implemented error rather than
+// silently succeeding; the CLI kills the tracked pid directly.
+func (l LocalRunner) Kill(name string) error {
+	return fmt.Errorf("local kill not handled by LocalRunner; the CLI stops the tracked pid")
+}
+
+var _ Runner = LocalRunner{}
