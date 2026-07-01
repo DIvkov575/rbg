@@ -7,6 +7,9 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"time"
+
+	"github.com/divkov575/rbg/internal/dbg"
 )
 
 // Result is a canned subprocess outcome for the Recording test runner.
@@ -47,7 +50,9 @@ func (Exec) Run(name string, args []string, stdin io.Reader) ([]byte, int, error
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
+	start := time.Now()
 	err := cmd.Run()
+	elapsed := time.Since(start)
 	code := 0
 	if ee, ok := err.(*exec.ExitError); ok {
 		code = ee.ExitCode()
@@ -58,6 +63,18 @@ func (Exec) Run(name string, args []string, stdin io.Reader) ([]byte, int, error
 			out.WriteByte('\n')
 		}
 		out.Write(errBuf.Bytes())
+	}
+	// Debug log every subprocess: this is the single choke point for ssh/claude/
+	// git, so a remote failure (e.g. an ssh connection timeout) is fully captured
+	// here — command, exit code, timing, and stderr — when RBG_DEBUG is set.
+	if dbg.Enabled() {
+		dbg.Logf("exec %s %v -> code=%d in %s", name, args, code, elapsed.Round(time.Millisecond))
+		if err != nil {
+			dbg.Logf("  err: %v", err)
+		}
+		if code != 0 && errBuf.Len() > 0 {
+			dbg.Logf("  stderr: %s", strings.TrimSpace(errBuf.String()))
+		}
 	}
 	return out.Bytes(), code, err
 }

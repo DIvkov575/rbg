@@ -67,6 +67,12 @@ func BuildSSHArgs(c *config.Config, remote []string, o Options) []string {
 			"-o", "ControlMaster=auto",
 			"-o", "ControlPath="+c.ControlPath,
 			"-o", "ControlPersist="+c.ControlPersist,
+			// Detect a half-dead multiplex master fast: without these, reusing a
+			// stale ControlPath socket can hang until ConnectTimeout and surface as
+			// "Connection to UNKNOWN port 65535 timed out". Probing keepalives make
+			// a dead master fail quickly so the next command reconnects cleanly.
+			"-o", "ServerAliveInterval=5",
+			"-o", "ServerAliveCountMax=1",
 		)
 	}
 	args = append(args, c.SSHOpts...)
