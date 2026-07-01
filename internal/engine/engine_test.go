@@ -54,6 +54,24 @@ func TestNewWiresRealHostImpls(t *testing.T) {
 	if _, ok := e.remote.Tx.(host.RemoteTranscripts); !ok {
 		t.Errorf("remote.Tx = %T, want host.RemoteTranscripts", e.remote.Tx)
 	}
+	if _, ok := e.local.Repo.(host.LocalRepo); !ok {
+		t.Errorf("local.Repo = %T, want host.LocalRepo", e.local.Repo)
+	}
+	if _, ok := e.remote.Repo.(host.RemoteRepo); !ok {
+		t.Errorf("remote.Repo = %T, want host.RemoteRepo", e.remote.Repo)
+	}
+	if _, ok := e.local.newRunner("/some/dir").(host.LocalRunner); !ok {
+		t.Errorf("local.newRunner = %T, want host.LocalRunner", e.local.newRunner("/some/dir"))
+	}
+	if _, ok := e.remote.newRunner("/some/dir").(host.RemoteRunner); !ok {
+		t.Errorf("remote.newRunner = %T, want host.RemoteRunner", e.remote.newRunner("/some/dir"))
+	}
+	if lr := e.local.newRunner("/some/dir").(host.LocalRunner); lr.Dir != "/some/dir" {
+		t.Errorf("local.newRunner(dir).Dir = %q, want /some/dir", lr.Dir)
+	}
+	if e.killLocal == nil {
+		t.Errorf("killLocal should default to a non-nil func")
+	}
 }
 
 func TestPickSelectsByLocation(t *testing.T) {
