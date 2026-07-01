@@ -164,6 +164,20 @@ func TestLocalRunnerSendSpawnsResume(t *testing.T) {
 	}
 }
 
+func TestLocalRunnerKillIsNotImplemented(t *testing.T) {
+	// LocalRunner cannot kill: local pid tracking lives in the Store/CLI layer.
+	// It must return an error (never a silent no-op that looks like success),
+	// and it must NOT spawn anything. This pins that deliberate contract.
+	sp := &recordingSpawn{}
+	err := (LocalRunner{Spawn: sp.spawn}).Kill("some-agent")
+	if err == nil {
+		t.Errorf("LocalRunner.Kill should return a not-implemented error, got nil")
+	}
+	if len(sp.calls) != 0 {
+		t.Errorf("Kill must not spawn anything, got %d spawn calls", len(sp.calls))
+	}
+}
+
 var errFakeSpawn = errorString("spawn failed")
 
 type errorString string
