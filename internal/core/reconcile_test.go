@@ -105,6 +105,24 @@ func TestReconcileResultIsSortedByName(t *testing.T) {
 	}
 }
 
+func TestReconcileManagedRecordWithNoLiveMatchPassesThrough(t *testing.T) {
+	// A managed record that has run (non-empty Session) but whose session is not
+	// in any live snapshot (agent dropped off `claude agents`, or host down) must
+	// pass through unchanged — not be lost, reset, or reclassified as foreign.
+	records := []Agent{{
+		Name: "gone", Repo: "r", Task: "t", Session: "sid-x",
+		State: Running, Origin: Managed, Where: Remote,
+	}}
+	got := Reconcile(records, nil, nil)
+	if len(got) != 1 {
+		t.Fatalf("got %d agents, want 1", len(got))
+	}
+	a := find(t, got, "gone")
+	if a.State != Running || a.Where != Remote || a.Origin != Managed || a.Session != "sid-x" {
+		t.Errorf("unmatched managed record changed: %+v", a)
+	}
+}
+
 func TestAdoptFlipsForeignToManaged(t *testing.T) {
 	f := Agent{Name: "x", Origin: Foreign, State: Done, Session: "s"}
 	got := Adopt(f)

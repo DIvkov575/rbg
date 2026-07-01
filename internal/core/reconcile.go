@@ -56,7 +56,7 @@ func Reconcile(records []Agent, localLive, remoteLive []Live) []Agent {
 	merge(localLive, Local)
 	merge(remoteLive, Remote)
 
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
