@@ -5,8 +5,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/divkov575/rbg/internal/config"
 	"github.com/divkov575/rbg/internal/core"
 	"github.com/divkov575/rbg/internal/run"
+	"github.com/divkov575/rbg/internal/sshx"
 )
 
 // Repo reconciles and reports the git state of a checkout on one machine.
@@ -104,3 +106,21 @@ func (l LocalRepo) Status(dir string) (core.Sync, error) { return syncStatus(l.g
 func (l LocalRepo) Pull(dir string) error                { return pull(l.git, dir) }
 
 var _ Repo = LocalRepo{}
+
+// RemoteRepo runs git on the desktop over SSH.
+type RemoteRepo struct {
+	C *config.Config
+	R run.Runner
+}
+
+// git runs `git -C <dir> <args>` on the desktop over SSH.
+func (s RemoteRepo) git(dir string, args []string) ([]byte, int, error) {
+	remote := append([]string{"git", "-C", dir}, args...)
+	sshArgs := sshx.BuildSSHArgs(s.C, remote, sshx.Options{ConnectTimeout: true})
+	return s.R.Run("ssh", sshArgs, nil)
+}
+
+func (s RemoteRepo) Status(dir string) (core.Sync, error) { return syncStatus(s.git, dir) }
+func (s RemoteRepo) Pull(dir string) error                { return pull(s.git, dir) }
+
+var _ Repo = RemoteRepo{}

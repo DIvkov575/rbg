@@ -3,6 +3,7 @@ package host
 import (
 	"testing"
 
+	"github.com/divkov575/rbg/internal/config"
 	"github.com/divkov575/rbg/internal/core"
 	"github.com/divkov575/rbg/internal/run"
 )
@@ -122,5 +123,55 @@ func TestLocalRepoPullFailsOnNonZero(t *testing.T) {
 	r := &run.Recording{Default: run.Result{Stdout: []byte("conflict"), Code: 1}}
 	if err := (LocalRepo{R: r}).Pull("/repo"); err == nil {
 		t.Errorf("expected error on non-zero pull exit")
+	}
+}
+
+func TestRemoteRepoStatusRunsGitOverSSH(t *testing.T) {
+	cfg := &config.Config{Host: "desktop", Mux: false}
+	r := &run.Recording{BySubstring: map[string]run.Result{
+		"status":    {Stdout: []byte(""), Code: 0},
+		"rev-parse": {Stdout: []byte("origin/main\n"), Code: 0},
+		"rev-list":  {Stdout: []byte("0\t1\n"), Code: 0}, // 1 ahead
+	}}
+	got, err := RemoteRepo{C: cfg, R: r}.Status("/srv/repo")
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got != core.Ahead {
+		t.Errorf("Status = %q, want ahead", got)
+	}
+	// every call is ssh, and the git command + dir + host must appear.
+	for _, c := range r.Calls {
+		if c.Name != "ssh" {
+			t.Errorf("ran %q, want ssh", c.Name)
+		}
+	}
+	j := joined(r.Calls[0].Args)
+	if !contains(j, "desktop") || !contains(j, "git") || !contains(j, "/srv/repo") {
+		t.Errorf("ssh git call missing host/git/dir: %v", r.Calls[0].Args)
+	}
+}
+
+func TestRemoteRepoPull(t *testing.T) {
+	cfg := &config.Config{Host: "desktop"}
+	r := &run.Recording{Default: run.Result{Code: 0}}
+	if err := (RemoteRepo{C: cfg, R: r}).Pull("/srv/repo"); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if r.Calls[0].Name != "ssh" {
+		t.Errorf("ran %q, want ssh", r.Calls[0].Name)
+	}
+	j := joined(r.Calls[0].Args)
+	if !contains(j, "pull") || !contains(j, "--ff-only") || !contains(j, "/srv/repo") {
+		t.Errorf("remote pull args wrong: %v", r.Calls[0].Args)
+	}
+}
+
+func TestRemoteRepoConfigsConnectTimeout(t *testing.T) {
+	// A down host must surface as an error via ssh's own non-zero exit, not hang.
+	cfg := &config.Config{Host: "desktop"}
+	r := &run.Recording{Default: run.Result{Stdout: []byte("ssh: connect timeout"), Code: 255}}
+	if _, err := (RemoteRepo{C: cfg, R: r}).Status("/srv/repo"); err == nil {
+		t.Errorf("expected error when ssh fails (exit 255)")
 	}
 }
