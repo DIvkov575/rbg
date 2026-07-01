@@ -68,3 +68,21 @@ func (e *Engine) Read(name string) ([]byte, error) {
 	}
 	return e.pick(a.Where).Tx.Read(a.Session)
 }
+
+// Adopt takes a foreign agent (discovered live on a machine but absent from
+// rbg's records) under management and persists it, so rbg tracks it going
+// forward (HLD F3). Adopting an agent that is already managed is an error.
+func (e *Engine) Adopt(name string) error {
+	a, err := e.find(name)
+	if err != nil {
+		return err
+	}
+	if !a.IsForeign() {
+		return fmt.Errorf("agent %q is already managed", name)
+	}
+	e.store.Add(core.Adopt(a))
+	if err := e.store.Save(); err != nil {
+		return fmt.Errorf("adopt: save: %w", err)
+	}
+	return nil
+}

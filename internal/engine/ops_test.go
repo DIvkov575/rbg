@@ -153,3 +153,40 @@ func TestReadAgentWithoutSessionErrors(t *testing.T) {
 		t.Errorf("reading a never-run agent should error")
 	}
 }
+
+func TestAdoptPersistsForeignAsManaged(t *testing.T) {
+	e := newTestEngine(t,
+		machine{Source: fakeSource{}},
+		machine{Source: fakeSource{live: []core.Live{
+			{SessionID: "R1", Name: "wild", Cwd: "/srv/app", State: "working"},
+		}}},
+	)
+	if err := e.Adopt("wild"); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	rec, ok := e.store.Get("wild")
+	if !ok {
+		t.Fatalf("adopted agent not in store")
+	}
+	if rec.Origin != core.Managed {
+		t.Errorf("adopted Origin = %q, want managed", rec.Origin)
+	}
+	if rec.Session != "R1" || rec.Dir != "/srv/app" {
+		t.Errorf("adopted record lost live identity: %+v", rec)
+	}
+}
+
+func TestAdoptNonForeignErrors(t *testing.T) {
+	e := newTestEngine(t, machine{Source: fakeSource{}}, machine{Source: fakeSource{}})
+	e.store.Add(core.Agent{Name: "mine", Task: "t", State: core.Held, Origin: core.Managed})
+	if err := e.Adopt("mine"); err == nil {
+		t.Errorf("adopting an already-managed agent should error")
+	}
+}
+
+func TestAdoptUnknownErrors(t *testing.T) {
+	e := newTestEngine(t, machine{Source: fakeSource{}}, machine{Source: fakeSource{}})
+	if err := e.Adopt("ghost"); err == nil {
+		t.Errorf("adopting an unknown agent should error")
+	}
+}
