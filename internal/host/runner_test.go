@@ -5,6 +5,7 @@ import (
 
 	"github.com/divkov575/rbg/internal/config"
 	"github.com/divkov575/rbg/internal/run"
+	"github.com/divkov575/rbg/internal/session"
 )
 
 func joined(args []string) string {
@@ -34,6 +35,25 @@ func TestRemoteRunnerLaunchParsesSession(t *testing.T) {
 	j := joined(r.Calls[0].Args)
 	if !contains(j, "launch") || !contains(j, "fix the bug") || !contains(j, "desktop") {
 		t.Errorf("ssh args missing launch/task/host: %v", r.Calls[0].Args)
+	}
+}
+
+func TestRemoteRunnerLaunchUsesDirAsCwd(t *testing.T) {
+	// A repo-backed remote agent must launch in the dir engine.Run synced, not
+	// the config default — so RemoteRunner.Dir overrides the agent's --cwd.
+	cfg := &config.Config{Host: "desktop", CWD: "/default/home", Mux: false}
+	r := &run.Recording{BySubstring: map[string]run.Result{
+		"launch": {Stdout: []byte(`{"id":"x","claudeSessionId":"s"}`), Code: 0},
+	}}
+	if _, err := (RemoteRunner{C: cfg, R: r, Dir: "/desk/workplace/app"}).Launch("x", "t"); err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	j := joined(r.Calls[0].Args)
+	if !contains(j, "--cwd") || !contains(j, "/desk/workplace/app") {
+		t.Errorf("launch should pass --cwd /desk/workplace/app, got %v", r.Calls[0].Args)
+	}
+	if contains(j, "/default/home") {
+		t.Errorf("Dir should override the config CWD, but /default/home leaked: %v", r.Calls[0].Args)
 	}
 }
 
@@ -164,6 +184,46 @@ func TestLocalRunnerSendSpawnsResume(t *testing.T) {
 	j := joined(sp.calls[0].args)
 	if !contains(j, "--resume") || !contains(j, "sid-9") || !contains(j, "next step") {
 		t.Errorf("resume args wrong: %v", sp.calls[0].args)
+	}
+}
+
+func TestLocalRunnerSendBusyWhenLockHeld(t *testing.T) {
+	// While a send to the same session is in flight (its lock held), a second
+	// send must return ErrBusy rather than spawning a racing resume — matching
+	// the remote exit-3 semantics.
+	dir := t.TempDir()
+	sp := &recordingSpawn{pid: 1}
+	lr := LocalRunner{Spawn: sp.spawn, LockDir: dir}
+
+	// Simulate an in-flight send by holding the session's lock.
+	held, ok, err := session.TryLock(lr.lockPath("sid-busy"))
+	if err != nil || !ok {
+		t.Fatalf("could not pre-acquire lock: ok=%v err=%v", ok, err)
+	}
+	defer held.Unlock()
+
+	if err := lr.Send("sid-busy", "second"); err != ErrBusy {
+		t.Errorf("Send while locked = %v, want ErrBusy", err)
+	}
+	if len(sp.calls) != 0 {
+		t.Errorf("busy Send must not spawn, got %d calls", len(sp.calls))
+	}
+}
+
+func TestLocalRunnerSendReleasesLockForNextSend(t *testing.T) {
+	// After a send completes, its lock is released so a subsequent send succeeds.
+	dir := t.TempDir()
+	sp := &recordingSpawn{pid: 1}
+	lr := LocalRunner{Spawn: sp.spawn, LockDir: dir}
+
+	if err := lr.Send("sid-x", "first"); err != nil {
+		t.Fatalf("first Send: %v", err)
+	}
+	if err := lr.Send("sid-x", "second"); err != nil {
+		t.Fatalf("second Send should succeed after lock release: %v", err)
+	}
+	if len(sp.calls) != 2 {
+		t.Errorf("want 2 spawns across two sends, got %d", len(sp.calls))
 	}
 }
 

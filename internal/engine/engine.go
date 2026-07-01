@@ -6,6 +6,7 @@
 package engine
 
 import (
+	"path/filepath"
 	"time"
 
 	"github.com/divkov575/rbg/internal/config"
@@ -17,11 +18,15 @@ import (
 // machine bundles the host capabilities for one machine: listing agents,
 // reading transcripts, git sync, and building a Runner. newRunner is a factory
 // (not a fixed Runner) because a local runner bakes the agent's working dir.
+// base/home are the machine's checkout root and home dir, used to derive a
+// repo-backed agent's working directory (see core.RepoDir) at Create time.
 type machine struct {
 	Source    host.AgentSource
 	Tx        host.Transcripts
 	Repo      host.Repo
 	newRunner func(dir string) host.Runner
+	base      string // checkout root for repo→dir derivation (e.g. ~/workplace)
+	home      string // home dir, for ~-relative repo paths
 }
 
 // Engine composes the store with the local and remote machine capability
@@ -44,6 +49,12 @@ func New(cfg *config.Config, r run.Runner, storePath, home string) (*Engine, err
 	if err != nil {
 		return nil, err
 	}
+	// Checkout roots for repo→dir derivation: the laptop uses ~/workplace; the
+	// desktop uses its configured working dir (RBG_CWD) as home, with the same
+	// workplace convention beneath it.
+	localBase := filepath.Join(home, "workplace")
+	remoteHome := cfg.CWD
+	remoteBase := filepath.Join(remoteHome, "workplace")
 	return &Engine{
 		store: store,
 		local: machine{
@@ -51,12 +62,16 @@ func New(cfg *config.Config, r run.Runner, storePath, home string) (*Engine, err
 			Tx:        host.LocalTranscripts{Home: home},
 			Repo:      host.LocalRepo{R: r},
 			newRunner: func(dir string) host.Runner { return host.LocalRunner{Dir: dir} },
+			base:      localBase,
+			home:      home,
 		},
 		remote: machine{
 			Source:    host.RemoteSource{C: cfg, R: r},
 			Tx:        host.RemoteTranscripts{C: cfg, R: r},
 			Repo:      host.RemoteRepo{C: cfg, R: r},
-			newRunner: func(dir string) host.Runner { return host.RemoteRunner{C: cfg, R: r} },
+			newRunner: func(dir string) host.Runner { return host.RemoteRunner{C: cfg, R: r, Dir: dir} },
+			base:      remoteBase,
+			home:      remoteHome,
 		},
 		killLocal: host.KillProcessGroup,
 		now:       func() string { return time.Now().UTC().Format(time.RFC3339) },

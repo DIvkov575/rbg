@@ -3,7 +3,9 @@ package host
 import (
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/divkov575/rbg/internal/core"
 )
@@ -15,6 +17,21 @@ type fakeSource struct {
 }
 
 func (f fakeSource) List() ([]core.Live, error) { return f.live, f.err }
+
+// gateSource blocks List() until release is closed, and records when it started,
+// so a test can prove both sources run concurrently rather than in series.
+type gateSource struct {
+	live    []core.Live
+	release <-chan struct{}
+	started chan struct{}
+	once    sync.Once
+}
+
+func (g *gateSource) List() ([]core.Live, error) {
+	g.once.Do(func() { close(g.started) })
+	<-g.release
+	return g.live, nil
+}
 
 func TestInventoryReconcilesRecordsWithBothMachines(t *testing.T) {
 	records := []core.Agent{
@@ -87,6 +104,40 @@ func TestInventoryBothFailStillReturnsRecords(t *testing.T) {
 	}
 	if len(agents) != 1 || agents[0].Name != "keep" {
 		t.Errorf("records-only inventory should survive total failure, got %+v", agents)
+	}
+}
+
+func TestInventoryProbesSourcesConcurrently(t *testing.T) {
+	// Both sources must be in-flight at the same time. Each gate signals when its
+	// List() begins; if the two ran serially, the second would never start until
+	// the first returned, and we release only after seeing BOTH start.
+	release := make(chan struct{})
+	local := &gateSource{live: []core.Live{{SessionID: "L", Name: "l", State: "idle"}}, release: release, started: make(chan struct{})}
+	remote := &gateSource{live: []core.Live{{SessionID: "R", Name: "r", State: "idle"}}, release: release, started: make(chan struct{})}
+
+	done := make(chan []core.Agent, 1)
+	go func() {
+		agents, _ := Inventory(nil, local, remote)
+		done <- agents
+	}()
+
+	// Both List() calls must begin before either is allowed to return.
+	for _, s := range []*gateSource{local, remote} {
+		select {
+		case <-s.started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("a source never started — Inventory is not probing concurrently")
+		}
+	}
+	close(release)
+
+	select {
+	case agents := <-done:
+		if len(agents) != 2 {
+			t.Errorf("got %d agents, want 2", len(agents))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Inventory did not complete after release")
 	}
 }
 

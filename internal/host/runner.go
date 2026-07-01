@@ -12,6 +12,7 @@ import (
 	"github.com/divkov575/rbg/internal/config"
 	"github.com/divkov575/rbg/internal/core"
 	"github.com/divkov575/rbg/internal/run"
+	"github.com/divkov575/rbg/internal/session"
 	"github.com/divkov575/rbg/internal/slug"
 	"github.com/divkov575/rbg/internal/sshx"
 )
@@ -29,6 +30,12 @@ type RunResult struct {
 	Name    string
 	Session string
 	Pid     int
+	// Dir is the working directory the agent was actually launched in, resolved
+	// to an absolute path. The caller persists it so a later resume (Send) runs
+	// in the same directory even if invoked from elsewhere — without this, a
+	// repo-less local agent (record Dir="") would resume in whatever cwd the
+	// next command happens to run from. Empty when unknown (remote).
+	Dir string
 }
 
 // Runner launches, continues, and stops agents on one machine. LocalRunner acts
@@ -46,12 +53,25 @@ const remoteExitBusy = 3
 type RemoteRunner struct {
 	C *config.Config
 	R run.Runner
+	// Dir is the desktop working directory the agent should run claude in. When
+	// set it overrides the config's default CWD, so a repo-backed agent launches
+	// (and resumes) in the checkout that engine.Run pulled — not the config
+	// default. Empty falls back to the config CWD.
+	Dir string
 }
 
-// ssh runs an rbg-agent verb over SSH and returns stdout + exit code.
+// ssh runs an rbg-agent verb over SSH and returns stdout + exit code. When Dir
+// is set, the rbg-agent runs with that as its --cwd (where claude launches),
+// so the launch happens in the same directory engine.Run synced.
 func (s RemoteRunner) ssh(verb string, verbArgs []string) ([]byte, int, error) {
-	remote := sshx.AgentArgs(s.C, verb, verbArgs)
-	args := sshx.BuildSSHArgs(s.C, remote, sshx.Options{ConnectTimeout: true})
+	c := s.C
+	if s.Dir != "" {
+		cp := *s.C
+		cp.CWD = s.Dir
+		c = &cp
+	}
+	remote := sshx.AgentArgs(c, verb, verbArgs)
+	args := sshx.BuildSSHArgs(c, remote, sshx.Options{ConnectTimeout: true})
 	return s.R.Run("ssh", args, nil)
 }
 
@@ -122,6 +142,14 @@ type LocalRunner struct {
 	Dir string
 	// LogDir is where a launched child's stdout log is written ("" = os.TempDir).
 	LogDir string
+	// LockDir is where per-session send locks live ("" = os.TempDir). A send
+	// takes an exclusive flock on <LockDir>/rbg-send-<session>.lock while it
+	// spawns, so two sends racing to the same session at once can't both fire —
+	// the loser gets ErrBusy, mirroring the desktop rbg-agent's exit-3 guard.
+	// NOTE: like rbg-agent, the lock covers only the spawn, not the detached
+	// child's full run (the fd can't travel into the detached process), so it
+	// serializes overlapping send COMMANDS, not the resumes' transcript writes.
+	LockDir string
 }
 
 func (l LocalRunner) spawnFn() agent.SpawnFunc {
@@ -142,25 +170,58 @@ func (l LocalRunner) logPath(session string) string {
 }
 
 // Launch starts a new local agent: derive a name (slug from task if empty),
-// generate a session id, and spawn detached headless claude with it.
+// generate a session id, and spawn detached headless claude with it. It reports
+// the resolved absolute working dir so the caller can persist it and pin later
+// resumes to the same directory (l.Dir=="" means claude used the process cwd,
+// which we resolve to an absolute path).
 func (l LocalRunner) Launch(name, task string) (RunResult, error) {
 	if name == "" {
 		name = slug.FromTask(task)
 	}
-	session := core.NewSessionID()
-	args := append([]string{"claude"}, claudecli.LaunchHeadlessArgs(session, task)...)
-	pid, err := l.spawnFn()(args[0], args[1:], l.logPath(session), l.Dir)
+	sess := core.NewSessionID() // note: `sess`, not `session` — avoid shadowing the session package
+	args := append([]string{"claude"}, claudecli.LaunchHeadlessArgs(sess, task)...)
+	pid, err := l.spawnFn()(args[0], args[1:], l.logPath(sess), l.Dir)
 	if err != nil {
 		return RunResult{}, fmt.Errorf("local launch spawn: %w", err)
 	}
-	return RunResult{Name: name, Session: session, Pid: pid}, nil
+	dir := l.Dir
+	if dir == "" {
+		if wd, err := os.Getwd(); err == nil {
+			dir = wd
+		}
+	}
+	return RunResult{Name: name, Session: sess, Pid: pid, Dir: dir}, nil
+}
+
+// lockPath returns the per-session send-lock path.
+func (l LocalRunner) lockPath(sess string) string {
+	dir := l.LockDir
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, "rbg-send-"+sess+".lock")
 }
 
 // Send continues a local claude session (identified by its session id) with a
-// follow-up task, by spawning a detached headless resume.
-func (l LocalRunner) Send(session, task string) error {
-	args := append([]string{"claude"}, claudecli.ResumeHeadlessArgs(session, task)...)
-	_, err := l.spawnFn()(args[0], args[1:], l.logPath(session), l.Dir)
+// follow-up task, by spawning a detached headless resume. It first takes an
+// exclusive per-session lock; if another send to the same session is mid-spawn
+// the lock is held, so this returns ErrBusy — matching RemoteRunner.Send's
+// exit-3 busy semantics. The lock is released once the child is spawned (the fd
+// can't travel into the detached process), so it serializes overlapping send
+// commands but not the resumes' transcript writes — the same trade-off the
+// desktop rbg-agent makes.
+func (l LocalRunner) Send(sess, task string) error {
+	lock, ok, err := session.TryLock(l.lockPath(sess))
+	if err != nil {
+		return fmt.Errorf("local send lock: %w", err)
+	}
+	if !ok {
+		return ErrBusy
+	}
+	defer lock.Unlock()
+
+	args := append([]string{"claude"}, claudecli.ResumeHeadlessArgs(sess, task)...)
+	_, err = l.spawnFn()(args[0], args[1:], l.logPath(sess), l.Dir)
 	if err != nil {
 		return fmt.Errorf("local send spawn: %w", err)
 	}

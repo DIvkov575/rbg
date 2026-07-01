@@ -153,3 +153,37 @@ func TestValidSessionID(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoDir(t *testing.T) {
+	const base = "/home/me/workplace"
+	const home = "/home/me"
+	cases := []struct {
+		name, repo, want string
+	}{
+		{"empty repo → empty", "", ""},
+		{"git url", "git@github.com:me/web-app.git", "/home/me/workplace/web-app"},
+		{"https url", "https://github.com/DIvkov575/mymemories.git", "/home/me/workplace/mymemories"},
+		{"bare name", "my-svc", "/home/me/workplace/my-svc"},
+		{"absolute path used verbatim", "/srv/app", "/srv/app"},
+		{"tilde expands to home", "~/code/thing", "/home/me/code/thing"},
+		{"trailing slash still yields the leaf", "https://github.com/me/app/", "/home/me/workplace/app"},
+		{"multiple trailing slashes", "me/app//", "/home/me/workplace/app"},
+	}
+	for _, c := range cases {
+		if got := RepoDir(base, home, c.repo); got != c.want {
+			t.Errorf("%s: RepoDir(%q,%q,%q) = %q, want %q", c.name, base, home, c.repo, got, c.want)
+		}
+	}
+}
+
+func TestRepoDirRefusesRelativeResult(t *testing.T) {
+	// If the base isn't absolute (e.g. RBG_CWD unset → base "workplace") or home
+	// isn't absolute for a ~-repo, RepoDir must return "" rather than a relative
+	// dir that would resolve against the wrong cwd on the remote machine.
+	if got := RepoDir("workplace", "", "my-svc"); got != "" {
+		t.Errorf("relative base should yield \"\", got %q", got)
+	}
+	if got := RepoDir("/w", "", "~/code/x"); got != "" {
+		t.Errorf("~-repo with no absolute home should yield \"\", got %q", got)
+	}
+}

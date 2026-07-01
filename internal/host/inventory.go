@@ -2,6 +2,7 @@ package host
 
 import (
 	"errors"
+	"sync"
 
 	"github.com/divkov575/rbg/internal/core"
 )
@@ -13,16 +14,28 @@ import (
 // inventory built from records plus whatever source(s) did answer. Callers
 // should surface a non-nil error to the operator but may still display agents.
 func Inventory(records []core.Agent, local, remote AgentSource) ([]core.Agent, error) {
-	var errs []error
+	// The two sources are independent I/O on different machines (a local exec and
+	// an SSH round-trip), so probe them concurrently: wall-clock becomes
+	// max(local, remote) instead of their sum, which matters when the remote adds
+	// network RTT. Each result is captured in its own slot, so there is no shared
+	// mutable state between the goroutines.
+	var (
+		wg                    sync.WaitGroup
+		localLive, remoteLive []core.Live
+		localErr, remoteErr   error
+	)
+	wg.Add(2)
+	go func() { defer wg.Done(); localLive, localErr = local.List() }()
+	go func() { defer wg.Done(); remoteLive, remoteErr = remote.List() }()
+	wg.Wait()
 
-	localLive, err := local.List()
-	if err != nil {
-		errs = append(errs, err)
+	var errs []error
+	if localErr != nil {
+		errs = append(errs, localErr)
 		localLive = nil
 	}
-	remoteLive, err := remote.List()
-	if err != nil {
-		errs = append(errs, err)
+	if remoteErr != nil {
+		errs = append(errs, remoteErr)
 		remoteLive = nil
 	}
 

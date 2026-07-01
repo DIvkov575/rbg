@@ -91,6 +91,61 @@ func TestCreateStagesHeldRecord(t *testing.T) {
 	}
 }
 
+func TestCreateDefaultsWhereToLocal(t *testing.T) {
+	// An unset Where must NOT silently route to the remote machine; it defaults
+	// to local so a task with no chosen machine runs on the laptop.
+	e := newTestEngine(t, machine{Source: fakeSource{}}, machine{Source: fakeSource{}})
+	got, err := e.Create(core.Agent{Name: "x", Task: "t"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got.Where != core.Local {
+		t.Errorf("unset Where = %q, want defaulted to local", got.Where)
+	}
+}
+
+func TestCreateRejectsInvalidWhere(t *testing.T) {
+	e := newTestEngine(t, machine{Source: fakeSource{}}, machine{Source: fakeSource{}})
+	if _, err := e.Create(core.Agent{Name: "x", Task: "t", Where: "mars"}); err == nil {
+		t.Errorf("invalid location should error")
+	}
+}
+
+func TestCreateDerivesDirFromRepo(t *testing.T) {
+	// A repo-backed agent with no explicit Dir gets one derived on its target
+	// machine, so Run never launches with an empty working directory.
+	local := machine{Source: fakeSource{}, base: "/home/me/workplace", home: "/home/me"}
+	remote := machine{Source: fakeSource{}, base: "/desk/workplace", home: "/desk"}
+	e := newTestEngine(t, local, remote)
+
+	loc, err := e.Create(core.Agent{Name: "l", Repo: "git@github.com:me/app.git", Task: "t", Where: core.Local})
+	if err != nil {
+		t.Fatalf("Create local: %v", err)
+	}
+	if loc.Dir != "/home/me/workplace/app" {
+		t.Errorf("local Dir = %q, want /home/me/workplace/app", loc.Dir)
+	}
+	rem, err := e.Create(core.Agent{Name: "r", Repo: "git@github.com:me/app.git", Task: "t", Where: core.Remote})
+	if err != nil {
+		t.Fatalf("Create remote: %v", err)
+	}
+	if rem.Dir != "/desk/workplace/app" {
+		t.Errorf("remote Dir = %q, want /desk/workplace/app", rem.Dir)
+	}
+}
+
+func TestCreateKeepsExplicitDir(t *testing.T) {
+	local := machine{Source: fakeSource{}, base: "/home/me/workplace", home: "/home/me"}
+	e := newTestEngine(t, local, machine{Source: fakeSource{}})
+	got, err := e.Create(core.Agent{Name: "x", Repo: "app", Dir: "/custom/path", Task: "t", Where: core.Local})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got.Dir != "/custom/path" {
+		t.Errorf("explicit Dir overwritten: %q", got.Dir)
+	}
+}
+
 func TestCreateRejectsBlankTaskAndName(t *testing.T) {
 	e := newTestEngine(t, machine{}, machine{})
 	if _, err := e.Create(core.Agent{Name: "x", Task: ""}); err == nil {
@@ -143,6 +198,46 @@ func TestReadUnknownAgentErrors(t *testing.T) {
 	e := newTestEngine(t, machine{Source: fakeSource{}}, machine{Source: fakeSource{}})
 	if _, err := e.Read("ghost"); err == nil {
 		t.Errorf("reading an unknown agent should error")
+	}
+}
+
+// explodingSource fails the test if List() is ever called — used to prove that
+// resolving a managed agent does not hit the machine sources (no SSH).
+type explodingSource struct{ t *testing.T }
+
+func (e explodingSource) List() ([]core.Live, error) {
+	e.t.Fatalf("List() must not be called when the agent is resolvable from the store")
+	return nil, nil
+}
+
+func TestFindResolvesManagedAgentFromStoreWithoutSources(t *testing.T) {
+	e := newTestEngine(t,
+		machine{Source: explodingSource{t}},
+		machine{Source: explodingSource{t}},
+	)
+	e.store.Add(core.Agent{Name: "mine", Session: "S1", Where: core.Local, State: core.Running, Origin: core.Managed, Task: "t"})
+
+	got, err := e.find("mine")
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if got.Session != "S1" || got.Where != core.Local {
+		t.Errorf("resolved wrong record: %+v", got)
+	}
+}
+
+func TestFindFallsBackToInventoryForForeign(t *testing.T) {
+	// A name absent from the store is only findable via live reconcile.
+	e := newTestEngine(t,
+		machine{Source: fakeSource{}},
+		machine{Source: fakeSource{live: []core.Live{{SessionID: "R1", Name: "wild", Cwd: "/srv", State: "working"}}}},
+	)
+	got, err := e.find("wild")
+	if err != nil {
+		t.Fatalf("find foreign: %v", err)
+	}
+	if got.Origin != core.Foreign || got.Where != core.Remote {
+		t.Errorf("foreign resolve wrong: %+v", got)
 	}
 }
 
