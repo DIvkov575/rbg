@@ -211,3 +211,67 @@ func TestSendToNeverRunErrors(t *testing.T) {
 		t.Errorf("sending to a never-run agent should error")
 	}
 }
+
+func TestKillRemoteCallsRunnerKill(t *testing.T) {
+	var killed string
+	rem := machine{
+		Source:    fakeSource{live: []core.Live{{SessionID: "S1", Name: "job", Cwd: "/srv", State: "working"}}},
+		newRunner: runnerFactory(fakeRunner{killed: &killed}),
+	}
+	e := newTestEngine(t, machine{Source: fakeSource{}}, rem)
+	e.store.Add(core.Agent{Name: "job", Session: "S1", Where: core.Remote, State: core.Running, Origin: core.Managed, Task: "t"})
+
+	if err := e.Kill("job"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if killed != "job" {
+		t.Errorf("remote Kill got %q, want job", killed)
+	}
+	rec, _ := e.store.Get("job")
+	if rec.State != core.Done {
+		t.Errorf("State = %q, want done after kill", rec.State)
+	}
+}
+
+func TestKillLocalUsesPid(t *testing.T) {
+	var killedPid int
+	loc := machine{
+		Source:    fakeSource{live: []core.Live{{SessionID: "LS", Name: "loc", Cwd: "/x", State: "working"}}},
+		newRunner: runnerFactory(fakeRunner{}),
+	}
+	e := newTestEngine(t, loc, machine{Source: fakeSource{}})
+	e.killLocal = func(pid int) error { killedPid = pid; return nil }
+	e.store.Add(core.Agent{Name: "loc", Session: "LS", Pid: 4242, Where: core.Local, State: core.Running, Origin: core.Managed, Task: "t"})
+
+	if err := e.Kill("loc"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if killedPid != 4242 {
+		t.Errorf("local Kill signalled pid %d, want 4242", killedPid)
+	}
+	rec, _ := e.store.Get("loc")
+	if rec.State != core.Done {
+		t.Errorf("State = %q, want done after kill", rec.State)
+	}
+}
+
+func TestKillLocalWithoutPidErrors(t *testing.T) {
+	loc := machine{
+		Source:    fakeSource{live: []core.Live{{SessionID: "LS", Name: "loc", Cwd: "/x", State: "working"}}},
+		newRunner: runnerFactory(fakeRunner{}),
+	}
+	e := newTestEngine(t, loc, machine{Source: fakeSource{}})
+	e.killLocal = func(pid int) error { t.Fatalf("must not kill with no pid"); return nil }
+	e.store.Add(core.Agent{Name: "loc", Session: "LS", Pid: 0, Where: core.Local, State: core.Running, Origin: core.Managed, Task: "t"})
+
+	if err := e.Kill("loc"); err == nil {
+		t.Errorf("local Kill with no recorded pid should error")
+	}
+}
+
+func TestKillUnknownErrors(t *testing.T) {
+	e := newTestEngine(t, machine{Source: fakeSource{}}, machine{Source: fakeSource{}})
+	if err := e.Kill("ghost"); err == nil {
+		t.Errorf("killing an unknown agent should error")
+	}
+}

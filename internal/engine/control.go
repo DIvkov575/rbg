@@ -59,3 +59,34 @@ func (e *Engine) Send(name, task string) error {
 	}
 	return e.pick(a.Where).newRunner(a.Dir).Send(id, task)
 }
+
+// Kill stops an agent (HLD F4). A remote agent is stopped via the desktop
+// rbg-agent (by name); a local agent is stopped by signalling its tracked child
+// pid (the Runner interface can't kill locally — the pid lives in the record).
+// A managed agent is then marked Done and persisted; the transcript is kept.
+func (e *Engine) Kill(name string) error {
+	a, err := e.find(name)
+	if err != nil {
+		return err
+	}
+	if a.Where == core.Local {
+		if a.Pid <= 0 {
+			return fmt.Errorf("kill: no recorded pid for local agent %q", name)
+		}
+		if err := e.killLocal(a.Pid); err != nil {
+			return fmt.Errorf("kill: local agent %q: %w", name, err)
+		}
+	} else {
+		if err := e.pick(core.Remote).newRunner(a.Dir).Kill(a.Name); err != nil {
+			return fmt.Errorf("kill: remote agent %q: %w", name, err)
+		}
+	}
+	if rec, ok := e.store.Get(name); ok {
+		rec.State = core.Done
+		e.store.Add(rec)
+		if err := e.store.Save(); err != nil {
+			return fmt.Errorf("kill: save: %w", err)
+		}
+	}
+	return nil
+}
