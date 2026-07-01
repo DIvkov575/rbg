@@ -32,10 +32,26 @@ func Dispatch(args []string, ops Ops, out io.Writer) int {
 	verb, rest := args[0], args[1:]
 	_ = rest
 	switch verb {
+	case "ls":
+		return doLs(ops, out)
 	default:
 		fmt.Fprintf(out, "rbg: unknown command %q\n\n%s", verb, usage())
 		return 2
 	}
+}
+
+// doLs renders the reconciled inventory. A degraded list (unreachable machine)
+// still renders the usable agents, prefixed with a warning, and exits non-zero.
+func doLs(ops Ops, out io.Writer) int {
+	agents, err := ops.List()
+	if err != nil {
+		fmt.Fprintf(out, "warning: inventory may be incomplete: %v\n", err)
+	}
+	fmt.Fprint(out, renderAgents(agents))
+	if err != nil {
+		return 1
+	}
+	return 0
 }
 
 // usage returns the scriptable-verb help text.
