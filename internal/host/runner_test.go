@@ -38,6 +38,25 @@ func TestRemoteRunnerLaunchParsesSession(t *testing.T) {
 	}
 }
 
+func TestRemoteRunnerLaunchUsesDirAsCwd(t *testing.T) {
+	// A repo-backed remote agent must launch in the dir engine.Run synced, not
+	// the config default — so RemoteRunner.Dir overrides the agent's --cwd.
+	cfg := &config.Config{Host: "desktop", CWD: "/default/home", Mux: false}
+	r := &run.Recording{BySubstring: map[string]run.Result{
+		"launch": {Stdout: []byte(`{"id":"x","claudeSessionId":"s"}`), Code: 0},
+	}}
+	if _, err := (RemoteRunner{C: cfg, R: r, Dir: "/desk/workplace/app"}).Launch("x", "t"); err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	j := joined(r.Calls[0].Args)
+	if !contains(j, "--cwd") || !contains(j, "/desk/workplace/app") {
+		t.Errorf("launch should pass --cwd /desk/workplace/app, got %v", r.Calls[0].Args)
+	}
+	if contains(j, "/default/home") {
+		t.Errorf("Dir should override the config CWD, but /default/home leaked: %v", r.Calls[0].Args)
+	}
+}
+
 func TestRemoteRunnerLaunchNonZeroErrors(t *testing.T) {
 	cfg := &config.Config{Host: "desktop"}
 	r := &run.Recording{Default: run.Result{Stdout: []byte("boom"), Code: 1}}

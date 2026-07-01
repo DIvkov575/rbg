@@ -43,22 +43,30 @@ func (e *Engine) Run(name string) error {
 	}
 
 	// The runner returns the RESOLVED name it actually launched under. The
-	// desktop rbg-agent dedups a colliding name (foo → foo-2), so if we kept our
-	// original name, later Send/Kill (which key the remote agent by name) would
-	// target an id the desktop doesn't have. Adopt the resolved name, re-keying
-	// the store record when it changed — but never over a DIFFERENT existing
-	// record (that would orphan its running child); in that unlikely case keep
-	// our own name and record the live session under it, which still resolves
-	// Send/Kill correctly for a local agent (by session) and is the safest
-	// outcome for a remote one.
+	// desktop rbg-agent dedups a colliding name (foo → foo-2) against ITS OWN
+	// store, so res.Name is guaranteed free on the desktop. Remote Send/Kill key
+	// the agent by name, so this record MUST adopt res.Name or the launched agent
+	// is unreachable. If a DIFFERENT rbg record already holds res.Name, it cannot
+	// be a live remote agent (the desktop just reported that name free), so it is
+	// either local (reachable by pid/session, not name) or a stale remote record
+	// — safe to move aside to a fresh key so the launched agent can take its
+	// rightful name.
 	if res.Name != "" && res.Name != rec.Name {
-		if _, taken := e.store.Get(res.Name); !taken {
-			e.store.Delete(rec.Name)
-			rec.Name = res.Name
+		if other, taken := e.store.Get(res.Name); taken {
+			e.store.Delete(res.Name)
+			other.Name = e.freeName(res.Name)
+			e.store.Add(other)
 		}
+		e.store.Delete(rec.Name)
+		rec.Name = res.Name
 	}
 	rec.Session = res.Session
 	rec.Pid = res.Pid
+	if rec.Dir == "" && res.Dir != "" {
+		// Pin the resume dir at launch time so a later Send runs where the agent
+		// actually started, not wherever the next command is invoked from.
+		rec.Dir = res.Dir
+	}
 	rec.State = core.Running
 	rec.RunAt = e.now()
 	e.store.Add(rec)

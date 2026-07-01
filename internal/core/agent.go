@@ -114,25 +114,41 @@ func DeriveSync(hasUpstream bool, behind, ahead int, dirty bool) Sync {
 // RepoDir resolves a repo identity to the working directory a delegated task
 // runs in on its machine. An absolute path (or ~-relative, expanded against
 // home) is used verbatim; a bare name or git URL maps to <base>/<repo-leaf>,
-// where base is the machine's checkout root (e.g. ~/workplace). This is the
-// single place the Repo→Dir convention lives, so Create can stamp Dir at stage
-// time and Run never launches a task with an empty working directory. Returns
-// "" for an empty repo (a repo-less task keeps whatever Dir it was given).
+// where base is the machine's checkout root (e.g. ~/workplace). It lets Create
+// stamp Dir at stage time so Run never launches a task with an empty working
+// directory. (Two other repo→dir mappers exist for legacy paths — the
+// dashboard's cmd/rbg dash.localRepoDir and rbg-agent's clone-into-rbg-repos —
+// which use different roots; the leaf-extraction logic is shared in spirit but
+// not yet unified, so keep those in sync when changing URL parsing here.)
+// Returns
+// "" for an empty repo (a repo-less task keeps whatever Dir it was given), and
+// "" when it can't produce an ABSOLUTE dir (base/home unresolved) — a relative
+// dir would resolve against the remote login shell's cwd rather than the
+// checkout root, so it's safer for Run to reject an empty dir than to launch
+// somewhere unintended.
 func RepoDir(base, home, repo string) string {
 	if repo == "" {
 		return ""
 	}
 	if strings.HasPrefix(repo, "~/") {
+		if !filepath.IsAbs(home) {
+			return "" // can't expand ~ without an absolute home
+		}
 		return filepath.Join(home, repo[2:])
 	}
 	if filepath.IsAbs(repo) {
 		return repo
 	}
-	leaf := repo
-	if i := strings.LastIndexAny(leaf, "/:"); i >= 0 {
-		leaf = leaf[i+1:]
+	// Trim any trailing slashes so "host/me/app/" yields leaf "app", not "".
+	trimmed := strings.TrimRight(repo, "/")
+	leaf := trimmed
+	if i := strings.LastIndexAny(trimmed, "/:"); i >= 0 {
+		leaf = trimmed[i+1:]
 	}
 	leaf = strings.TrimSuffix(leaf, ".git")
+	if leaf == "" || !filepath.IsAbs(base) {
+		return "" // no usable leaf, or base isn't absolute → let Run reject it
+	}
 	return filepath.Join(base, leaf)
 }
 

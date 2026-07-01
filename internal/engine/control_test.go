@@ -92,6 +92,46 @@ func TestRunRemoteSyncsThenLaunchesAndRecords(t *testing.T) {
 	}
 }
 
+func TestRunPinsLaunchDirWhenRecordDirEmpty(t *testing.T) {
+	// A repo-less agent has Dir="" at Create; Run must persist the dir the runner
+	// actually launched in, so a later Send resumes in the same place.
+	loc := machine{
+		Source:    fakeSource{},
+		Repo:      fakeRepo{},
+		newRunner: runnerFactory(fakeRunner{res: host.RunResult{Name: "n", Session: "S", Pid: 1, Dir: "/real/cwd"}}),
+	}
+	e := newTestEngine(t, loc, machine{Source: fakeSource{}})
+	e.store.Add(core.Agent{Name: "n", Dir: "", Task: "t", Where: core.Local, State: core.Held, Origin: core.Managed})
+
+	if err := e.Run("n"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	rec, _ := e.store.Get("n")
+	if rec.Dir != "/real/cwd" {
+		t.Errorf("Dir = %q, want pinned /real/cwd", rec.Dir)
+	}
+}
+
+func TestRunKeepsExplicitDirOverLaunchDir(t *testing.T) {
+	// If the record already has a Dir (repo-backed), Run must not overwrite it
+	// with the runner's report.
+	loc := machine{
+		Source:    fakeSource{},
+		Repo:      fakeRepo{},
+		newRunner: runnerFactory(fakeRunner{res: host.RunResult{Name: "n", Session: "S", Dir: "/other"}}),
+	}
+	e := newTestEngine(t, loc, machine{Source: fakeSource{}})
+	e.store.Add(core.Agent{Name: "n", Dir: "/explicit", Task: "t", Where: core.Local, State: core.Held, Origin: core.Managed})
+
+	if err := e.Run("n"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	rec, _ := e.store.Get("n")
+	if rec.Dir != "/explicit" {
+		t.Errorf("Dir = %q, want /explicit (unchanged)", rec.Dir)
+	}
+}
+
 func TestRunLocalRecordsPid(t *testing.T) {
 	loc := machine{
 		Source:    fakeSource{},
@@ -177,31 +217,36 @@ func TestRunAdoptsResolvedNameFromLaunch(t *testing.T) {
 	}
 }
 
-func TestRunDoesNotClobberDifferentRecordOnNameCollision(t *testing.T) {
-	// The launch resolves to "job-2", but a DIFFERENT managed record already owns
-	// that name. Re-keying must not overwrite it (which would orphan its child);
-	// the launched agent keeps its own name with the new session recorded.
+func TestRunNameCollisionMovesOccupantAsideAndAdoptsResolvedName(t *testing.T) {
+	// The desktop deduped to "job-2", which a DIFFERENT rbg record (a local agent)
+	// already holds. The launched agent MUST take "job-2" (remote Send/Kill key by
+	// name), and the occupant is moved to a fresh key so nothing is lost or
+	// clobbered.
 	rem := machine{
 		Source:    fakeSource{},
 		Repo:      fakeRepo{},
 		newRunner: runnerFactory(fakeRunner{res: host.RunResult{Name: "job-2", Session: "NEW"}}),
 	}
 	e := newTestEngine(t, machine{Source: fakeSource{}}, rem)
-	e.store.Add(core.Agent{Name: "job-2", Session: "EXISTING", Pid: 777, Where: core.Remote, State: core.Running, Origin: core.Managed, Task: "other"})
+	e.store.Add(core.Agent{Name: "job-2", Session: "EXISTING", Pid: 777, Where: core.Local, State: core.Running, Origin: core.Managed, Task: "other"})
 	e.store.Add(core.Agent{Name: "job", Task: "t", Where: core.Remote, State: core.Held, Origin: core.Managed})
 
 	if err := e.Run("job"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	// The pre-existing job-2 must be untouched.
-	other, ok := e.store.Get("job-2")
-	if !ok || other.Session != "EXISTING" || other.Pid != 777 {
-		t.Errorf("pre-existing job-2 was clobbered: %+v ok=%v", other, ok)
+	// The launched remote agent took the resolved name with its new session.
+	launched, ok := e.store.Get("job-2")
+	if !ok || launched.Session != "NEW" || launched.Where != core.Remote {
+		t.Errorf("launched agent should own 'job-2' with the new session: %+v ok=%v", launched, ok)
 	}
-	// The launched agent kept its own name with the new session.
-	launched, ok := e.store.Get("job")
-	if !ok || launched.Session != "NEW" {
-		t.Errorf("launched agent should keep name 'job' with the new session: %+v ok=%v", launched, ok)
+	// The original 'job' key is gone (re-keyed to job-2).
+	if _, ok := e.store.Get("job"); ok {
+		t.Errorf("original 'job' key should be removed after adopting resolved name")
+	}
+	// The displaced occupant survives under a fresh key with its identity intact.
+	moved, ok := e.store.Get("job-2-2")
+	if !ok || moved.Session != "EXISTING" || moved.Pid != 777 {
+		t.Errorf("displaced occupant should survive at a fresh key with identity intact, got %+v ok=%v", moved, ok)
 	}
 }
 

@@ -69,7 +69,7 @@ func New(cfg *config.Config, r run.Runner, storePath, home string) (*Engine, err
 			Source:    host.RemoteSource{C: cfg, R: r},
 			Tx:        host.RemoteTranscripts{C: cfg, R: r},
 			Repo:      host.RemoteRepo{C: cfg, R: r},
-			newRunner: func(dir string) host.Runner { return host.RemoteRunner{C: cfg, R: r} },
+			newRunner: func(dir string) host.Runner { return host.RemoteRunner{C: cfg, R: r, Dir: dir} },
 			base:      remoteBase,
 			home:      remoteHome,
 		},
