@@ -2,16 +2,16 @@ package core
 
 import "testing"
 
-func TestMergeProjectsDedupsByRepoFirstWins(t *testing.T) {
-	local := []Project{
+func TestMergeSuggestionsDedupsByRepoFirstWins(t *testing.T) {
+	local := []Suggestion{
 		{Label: "app (local)", Repo: "/home/me/workplace/app", Origin: "local"},
 		{Label: "web", Repo: "web", Origin: "local"},
 	}
-	github := []Project{
+	github := []Suggestion{
 		{Label: "app (github)", Repo: "/home/me/workplace/app", Origin: "github"}, // dup Repo
 		{Label: "newthing", Repo: "me/newthing", Origin: "github"},
 	}
-	got := MergeProjects(local, github)
+	got := MergeSuggestions(local, github)
 
 	// dup Repo keeps the first (local) origin
 	var appCount int
@@ -38,8 +38,8 @@ func TestMergeProjectsDedupsByRepoFirstWins(t *testing.T) {
 	}
 }
 
-func TestMergeProjectsSkipsEmptyRepo(t *testing.T) {
-	got := MergeProjects([]Project{{Label: "blank", Repo: ""}, {Label: "ok", Repo: "x"}})
+func TestMergeSuggestionsSkipsEmptyRepo(t *testing.T) {
+	got := MergeSuggestions([]Suggestion{{Label: "blank", Repo: ""}, {Label: "ok", Repo: "x"}})
 	if len(got) != 1 || got[0].Repo != "x" {
 		t.Errorf("empty-repo project should be skipped, got %+v", got)
 	}
