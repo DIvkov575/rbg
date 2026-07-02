@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/divkov575/rbg/internal/agent"
+	"github.com/divkov575/rbg/internal/ptybridge"
 	"github.com/divkov575/rbg/internal/run"
 )
 
@@ -73,6 +74,11 @@ func parseArgs(args []string) (*invocation, error) {
 		if inv.Name == "" {
 			return nil, errors.New("kill requires --id")
 		}
+	case "attach":
+		inv.Name = flagValue(rest, "--id")
+		if inv.Name == "" {
+			return nil, errors.New("attach requires --id")
+		}
 	case "clone":
 		inv.Repo = flagValue(rest, "--repo")
 		if inv.Repo == "" {
@@ -134,5 +140,12 @@ func main() {
 		os.Exit(a.Kill(os.Stdout, inv.Name))
 	case "clone":
 		os.Exit(a.Clone(os.Stdout, inv.Repo))
+	case "attach":
+		home, _ := os.UserHomeDir()
+		if err := ptybridge.Attach(home, inv.Name, os.Stdin, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintf(os.Stderr, "rbg-agent: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 }

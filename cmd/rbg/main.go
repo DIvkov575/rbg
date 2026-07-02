@@ -132,11 +132,12 @@ func runLegacy(verb string, rest []string) int {
 }
 
 // attach resolves the claude session id from the agent's ls, then drops into an
-// interactive `claude --resume` over an ssh tty.
+// interactive bridge to the LIVE bg agent's terminal over an ssh tty. We run
+// `rbg-agent attach` on the desktop: it connects the daemon's pty socket for the
+// session and pipes it to the ssh tty. This works on a running bg session, where
+// `claude --resume` fails (a live process already owns the session).
 func attach(cfg *config.Config, r run.Runner, name string) int {
 	sshx.EnsureReachable(cfg, r)
-	// For attach we shell out to ssh -t directly so the user gets the real tty;
-	// we pass claude --resume with the recorded id. Resolve id via agent ls.
 	body, code := func() ([]byte, int) {
 		out, c, _ := r.Run("ssh", sshx.BuildSSHArgs(cfg, sshx.AgentArgs(cfg, "ls", nil), sshx.Options{}), nil)
 		return out, c
@@ -150,7 +151,7 @@ func attach(cfg *config.Config, r run.Runner, name string) int {
 		fmt.Fprintf(os.Stderr, "rbg: unknown agent %q\n", name)
 		return 1
 	}
-	args := sshx.BuildSSHArgs(cfg, []string{"claude", "--resume", id}, sshx.Options{TTY: true})
+	args := sshx.BuildSSHArgs(cfg, sshx.AgentArgs(cfg, "attach", []string{"--id", id}), sshx.Options{TTY: true})
 	// Interactive: connect to the real terminal.
 	return runInteractive("ssh", args)
 }
