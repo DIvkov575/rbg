@@ -1,58 +1,50 @@
 package render
 
 import (
-	"bytes"
+	"strings"
 	"testing"
 )
 
-func TestLine_StringContent(t *testing.T) {
-	got, ok := Line(`{"type":"user","message":{"role":"user","content":"hello"}}`)
-	if !ok || got != "user: hello" {
-		t.Fatalf("got %q ok=%v", got, ok)
+const fixture = `{"type":"user","message":{"role":"user","content":"add a test"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"sure"},{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok\nPASS\nmore\nlines\nhere"}]}}
+garbage-not-json
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}`
+
+func TestRenderAllTurns(t *testing.T) {
+	lines := Render([]byte(fixture), Options{TruncateResult: 2})
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "add a test") {
+		t.Error("missing user prompt")
+	}
+	if !strings.Contains(joined, "Bash") || !strings.Contains(joined, "go test") {
+		t.Error("tool_use should show name + input summary")
+	}
+	if !strings.Contains(joined, "+3 more") {
+		t.Errorf("tool_result should truncate to 2 lines with marker, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "garbage-not-json") {
+		t.Error("malformed line must be skipped")
+	}
+	if !strings.Contains(joined, "done") {
+		t.Error("final assistant turn missing")
 	}
 }
 
-func TestLine_TextBlocks(t *testing.T) {
-	in := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi there"}]}}`
-	got, ok := Line(in)
-	if !ok || got != "assistant: hi there" {
-		t.Fatalf("got %q ok=%v", got, ok)
+func TestRenderTailLimitsTurns(t *testing.T) {
+	lines := Render([]byte(fixture), Options{Tail: 1})
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "done") {
+		t.Error("tail should include the last turn")
+	}
+	if strings.Contains(joined, "add a test") {
+		t.Error("tail=1 should exclude earlier turns")
 	}
 }
 
-func TestLine_ToolUse(t *testing.T) {
-	in := `{"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash"}]}}`
-	got, ok := Line(in)
-	if !ok || got != "assistant: [tool: Bash]" {
-		t.Fatalf("got %q ok=%v", got, ok)
-	}
-}
-
-func TestLine_SkipsBlankBadEmpty(t *testing.T) {
-	for _, in := range []string{"", "   ", "{bad json", `{"type":"system","message":{"content":[]}}`} {
-		if got, ok := Line(in); ok {
-			t.Fatalf("expected skip for %q, got %q", in, got)
-		}
-	}
-}
-
-func TestLine_ToleratesUnknownKeys(t *testing.T) {
-	in := `{"type":"assistant","weird":1,"message":{"role":"assistant","content":"ok"}}`
-	got, ok := Line(in)
-	if !ok || got != "assistant: ok" {
-		t.Fatalf("got %q ok=%v", got, ok)
-	}
-}
-
-func TestStream_PrintsOnlyRenderable(t *testing.T) {
-	lines := []string{
-		`{"message":{"role":"user","content":"q"}}`,
-		"garbage",
-		`{"message":{"role":"assistant","content":"a"}}`,
-	}
-	var buf bytes.Buffer
-	Stream(lines, &buf)
-	if buf.String() != "user: q\nassistant: a\n" {
-		t.Fatalf("got %q", buf.String())
+func TestRenderEmpty(t *testing.T) {
+	lines := Render(nil, Options{})
+	if len(lines) != 1 || !strings.Contains(lines[0], "no conversation") {
+		t.Errorf("empty transcript should yield a placeholder, got %v", lines)
 	}
 }
