@@ -127,9 +127,44 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.sendFollowupCmd(m.pager.agent, task), spinCmd())
 		}
 		return m, nil
+	case modePicker:
+		pk, act := m.picker.key(s, r)
+		m.picker = pk
+		switch act {
+		case pickerCancel:
+			m.mode = modeList
+			return m, nil
+		case pickerSpawn:
+			return m.spawnFromPicker()
+		}
+		return m, nil
 	default:
 		return m.keyList(s, r)
 	}
+}
+
+// spawnFromPicker spawns a background agent for the picked project + task. The
+// machine follows the current view's machine (remote/local); the project view
+// defaults to remote. The chosen repo may be a local path, a remote path, or a
+// GitHub "owner/name" — engine.Create derives the working dir from it.
+func (m Model) spawnFromPicker() (tea.Model, tea.Cmd) {
+	where, ok := m.view.machine()
+	if !ok {
+		where = core.Remote
+	}
+	spec := core.Agent{Task: strings.TrimSpace(m.picker.task), Repo: m.picker.repo, Where: where}
+	m.mode = modeList
+	m.spawning = true
+	m.status = "spawning agent in " + projectLabel(m.picker.repo) + "…"
+	return m, tea.Batch(m.spawnCmd(spec), spinCmd())
+}
+
+// projectLabel is a short human label for a chosen repo ("(no repo)" when empty).
+func projectLabel(repo string) string {
+	if repo == "" {
+		return "(no repo)"
+	}
+	return core.ProjectKey(core.Agent{Repo: repo})
 }
 
 // keyList handles keys on the agents list. The prompt bar is always focused for
@@ -187,6 +222,12 @@ func (m Model) keyList(s string, r rune) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "debug off — set RBG_DEBUG=1 and relaunch to log ssh/claude calls"
 		}
+		return m, nil
+	case "new":
+		// Open the project selector: pick any project (local/remote/github),
+		// then type the task, then spawn there.
+		m.picker = newPicker(m.ops.Projects())
+		m.mode = modePicker
 		return m, nil
 	}
 	return m, nil
@@ -279,6 +320,8 @@ func keyName(k tea.KeyMsg) (string, rune) {
 		return "repair", 0
 	case tea.KeyCtrlD:
 		return "debug", 0
+	case tea.KeyCtrlN:
+		return "new", 0
 	case tea.KeyUp:
 		return "up", 0
 	case tea.KeyDown:

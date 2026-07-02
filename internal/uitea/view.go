@@ -37,9 +37,51 @@ func (m Model) View() string {
 	switch m.mode {
 	case modePager:
 		return m.viewPager()
+	case modePicker:
+		return m.viewPicker()
 	default:
 		return m.viewList()
 	}
+}
+
+// viewPicker renders the project selector: a filter+list while choosing, then a
+// task prompt once a project is picked.
+func (m Model) viewPicker() string {
+	p := m.picker
+	var b strings.Builder
+	if !p.choosing {
+		b.WriteString(stTitle.Render("New agent in "+projectLabel(p.repo)) + "\n\n")
+		b.WriteString(stSection.Render("task › ") + p.task + stHints.Render("▏"))
+		b.WriteString("\n\n" + stHints.Render("type the task · enter spawns · esc cancel"))
+		return b.String()
+	}
+	b.WriteString(stTitle.Render("Pick a project") + "\n")
+	b.WriteString(stHints.Render("filter: "+p.filter+"▏") + "\n\n")
+	matches := p.matches()
+	win := m.h - 6
+	if win < 3 {
+		win = 3
+	}
+	start := 0
+	if p.cursor >= win {
+		start = p.cursor - win + 1
+	}
+	end := start + win
+	if end > len(matches) {
+		end = len(matches)
+	}
+	for i := start; i < end; i++ {
+		if i == p.cursor {
+			b.WriteString(stSelected.Render("▸ "+matches[i].Label) + "\n")
+		} else {
+			b.WriteString(stRow.Render("  "+matches[i].Label) + "\n")
+		}
+	}
+	if len(matches) == 0 {
+		b.WriteString(stHints.Render("  (no matches)") + "\n")
+	}
+	b.WriteString("\n" + stHints.Render("type to filter · ↑/↓ move · enter choose · esc cancel"))
+	return b.String()
 }
 
 // dot returns a colored status dot for an agent's lifecycle, echoing the
@@ -122,7 +164,7 @@ func (m Model) viewList() string {
 	}
 	b.WriteString("\n\n" + stSection.Render(label) + m.listPrompt + stHints.Render("▏") + spinner)
 	b.WriteString("\n" + stHints.Render(
-		"type → enter spawns · ↑/↓ move · tab lens · ^x kill · ^a adopt · ^r refresh · ^p repair · ^d debug · ^c quit"))
+		"type → enter spawns here · ^n pick project · ↑/↓ move · tab lens · ^x kill · ^a adopt · ^r refresh · ^p repair · ^c quit"))
 	return b.String()
 }
 

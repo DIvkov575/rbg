@@ -32,8 +32,9 @@ type Ops interface {
 type mode int
 
 const (
-	modeList  mode = iota // the agents list (with the spawn prompt bar)
-	modePager             // the remote session view (transcript + prompt bar)
+	modeList   mode = iota // the agents list (with the spawn prompt bar)
+	modePager              // the remote session view (transcript + prompt bar)
+	modePicker             // the project selector for spawning a new agent
 )
 
 // --- messages (results of async engine work) ---
@@ -90,7 +91,8 @@ type Model struct {
 	spawning   bool   // a spawn is in flight (spinner)
 	spin       int    // spinner frame
 
-	pager pagerModel
+	pager  pagerModel
+	picker pickerModel
 }
 
 // New builds a dashboard model over ops.

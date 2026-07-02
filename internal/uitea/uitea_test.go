@@ -273,6 +273,41 @@ func TestTabCyclesLens(t *testing.T) {
 	}
 }
 
+func TestProjectSelectorSpawns(t *testing.T) {
+	// ^n opens the project selector; choose a project, type a task, enter spawns
+	// (create+run) there. Index 0 is "(no repo)", 1 is the first suggestion.
+	o := &recOps{
+		agents:   []core.Agent{remote("a")},
+		projects: []core.Project{{Label: "rbg (github)", Repo: "me/rbg", Origin: "github"}},
+	}
+	m := loaded(o)
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN}) // open selector
+	m = mm.(Model)
+	if m.mode != modePicker {
+		t.Fatalf("^n should open the project selector, mode=%d", m.mode)
+	}
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // move to the github project
+	m = mm.(Model)
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // choose it → task stage
+	m = mm.(Model)
+	if m.picker.choosing {
+		t.Fatal("choosing a project should advance to task entry")
+	}
+	m = typeStr(m, "add tests")
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // spawn
+	m = mm.(Model)
+	if !m.spawning {
+		t.Error("picker spawn should set spawning")
+	}
+	drainFor(t, cmd, func(msg tea.Msg) bool { _, ok := msg.(spawnedMsg); return ok })
+	if o.created.Repo != "me/rbg" || o.created.Task != "add tests" {
+		t.Errorf("picker spawn wrong: %+v", o.created)
+	}
+	if o.ran == "" {
+		t.Error("picker spawn should also run the agent")
+	}
+}
+
 func TestRepairKeyDispatchesRepair(t *testing.T) {
 	o := &recOps{agents: []core.Agent{remote("a")}}
 	m := loaded(o)
