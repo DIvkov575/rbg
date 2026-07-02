@@ -1,12 +1,18 @@
 package uitea
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/divkov575/rbg/internal/core"
 )
+
+// errStr is a trivial error for tests.
+type errStr string
+
+func (e errStr) Error() string { return string(e) }
 
 // recOps records calls and returns canned data.
 type recOps struct {
@@ -19,6 +25,7 @@ type recOps struct {
 	created  core.Agent
 	readName string
 	readData []byte
+	repaired bool
 }
 
 func (o *recOps) List() ([]core.Agent, error)             { return o.agents, nil }
@@ -34,6 +41,7 @@ func (o *recOps) Send(n, t string) error                  { o.sent = [2]string{n
 func (o *recOps) Read(n string) ([]byte, error)           { o.readName = n; return o.readData, nil }
 func (o *recOps) Kill(n string) error                     { o.killed = n; return nil }
 func (o *recOps) Adopt(n string) error                    { o.adopted = n; return nil }
+func (o *recOps) RepairRemote() (bool, error)             { o.repaired = true; return true, nil }
 func (o *recOps) Projects() []core.Project                { return o.projects }
 
 func remote(name string) core.Agent {
@@ -63,22 +71,6 @@ func TestAgentsMsgPopulatesAndClamps(t *testing.T) {
 	}
 	if m.cursor != 0 {
 		t.Errorf("cursor should clamp to 0, got %d", m.cursor)
-	}
-}
-
-func TestRunKeyDispatchesRunCmd(t *testing.T) {
-	o := &recOps{agents: []core.Agent{remote("job")}}
-	m := loaded(o)
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG}) // ^g = run
-	if cmd == nil {
-		t.Fatal("ctrl-g should return a run command")
-	}
-	msg := cmd() // execute the async cmd
-	if o.ran != "job" {
-		t.Errorf("Run called with %q, want job", o.ran)
-	}
-	if _, ok := msg.(statusMsg); !ok {
-		t.Errorf("run cmd should yield a statusMsg, got %T", msg)
 	}
 }
 
@@ -278,6 +270,26 @@ func TestTabCyclesLens(t *testing.T) {
 	m = mm.(Model)
 	if m.view != viewProject {
 		t.Errorf("tab from local should advance to projects, got %v", m.view)
+	}
+}
+
+func TestRepairKeyDispatchesRepair(t *testing.T) {
+	o := &recOps{agents: []core.Agent{remote("a")}}
+	m := loaded(o)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP}) // ^p = repair
+	if cmd == nil {
+		t.Fatal("ctrl-p should dispatch a repair command")
+	}
+	drainFor(t, cmd, func(msg tea.Msg) bool { _, ok := msg.(repairedMsg); return ok })
+	if !o.repaired {
+		t.Error("RepairRemote should have been called")
+	}
+}
+
+func TestFriendlyErrTranslatesTimeout(t *testing.T) {
+	got := friendlyErr(errStr("remote claude agents exited 255: Connection timed out"))
+	if !strings.Contains(got, "repair") {
+		t.Errorf("timeout error should suggest repair, got %q", got)
 	}
 }
 

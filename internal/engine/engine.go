@@ -13,6 +13,7 @@ import (
 	"github.com/divkov575/rbg/internal/core"
 	"github.com/divkov575/rbg/internal/host"
 	"github.com/divkov575/rbg/internal/run"
+	"github.com/divkov575/rbg/internal/sshx"
 )
 
 // machine bundles the host capabilities for one machine: listing agents,
@@ -39,6 +40,8 @@ type Engine struct {
 	killLocal func(pid int) error
 	now       func() string
 	projects  func() []core.Project // suggested targets for a new agent (injectable)
+	repair    func() error          // repair the remote connection (close stale ssh master)
+	reachable func() bool           // is the remote reachable right now
 }
 
 // New builds an Engine: it loads (or initializes) the store at storePath and
@@ -98,7 +101,25 @@ func New(cfg *config.Config, r run.Runner, storePath, home string) (*Engine, err
 			host.ProjectsFromAgents(agents),
 		)
 	}
+	e.repair = func() error { return sshx.CloseMaster(cfg, r) }
+	e.reachable = func() bool { return sshx.Reachable(cfg, r) }
 	return e, nil
+}
+
+// RepairRemote closes any stale SSH multiplex master so the next remote command
+// reconnects fresh — the fix for a wedged connection surfacing as opaque
+// timeouts. Returns whether the remote is reachable afterward, plus any error
+// from the close attempt.
+func (e *Engine) RepairRemote() (bool, error) {
+	if e.repair == nil {
+		return false, nil
+	}
+	err := e.repair()
+	ok := false
+	if e.reachable != nil {
+		ok = e.reachable()
+	}
+	return ok, err
 }
 
 // pick returns the capability bundle for a location — the laptop is just

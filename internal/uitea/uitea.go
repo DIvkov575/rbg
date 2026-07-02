@@ -25,6 +25,7 @@ type Ops interface {
 	Kill(name string) error
 	Adopt(name string) error
 	Projects() []core.Project
+	RepairRemote() (bool, error)
 }
 
 // mode is which screen the model is showing.
@@ -67,6 +68,12 @@ type spinTick struct{}
 type spawnedMsg struct {
 	name string
 	err  error
+}
+
+// repairedMsg reports a remote-connection repair completed.
+type repairedMsg struct {
+	ok  bool
+	err error
 }
 
 // Model is the whole dashboard state.
@@ -187,6 +194,16 @@ func (m Model) spawnCmd(spec core.Agent) tea.Cmd {
 			return spawnedMsg{name: created.Name, err: err}
 		}
 		return spawnedMsg{name: created.Name}
+	}
+}
+
+// repairCmd repairs the remote connection (closes a stale ssh master) and
+// reports reachability.
+func (m Model) repairCmd() tea.Cmd {
+	ops := m.ops
+	return func() tea.Msg {
+		ok, err := ops.RepairRemote()
+		return repairedMsg{ok: ok, err: err}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/divkov575/rbg/internal/core"
+	"github.com/divkov575/rbg/internal/dbg"
 )
 
 // Update is the Bubble Tea reducer. It folds window-size events, async engine
@@ -21,9 +22,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentsMsg:
 		m.agents = msg.agents
 		if msg.err != nil {
-			m.status = "inventory may be incomplete: " + msg.err.Error()
+			m.status = friendlyErr(msg.err)
 		}
 		m.clampCursor()
+		return m, nil
+
+	case repairedMsg:
+		m.spawning = false
+		if msg.err != nil {
+			m.status = "repair failed: " + msg.err.Error()
+			return m, nil
+		}
+		if msg.ok {
+			m.status = "remote reconnected — refreshing…"
+			return m, m.listCmd()
+		}
+		m.status = "remote still unreachable (check the desktop / mwinit)"
 		return m, nil
 
 	case statusMsg:
@@ -151,11 +165,6 @@ func (m Model) keyList(s string, r rune) (tea.Model, tea.Cmd) {
 			return m.spawnFromPrompt()
 		}
 		return m.openSelected()
-	case "run":
-		if a, ok := m.selected(); ok {
-			m.status = "running " + a.Name + "…"
-			return m, m.runCmd(a.Name)
-		}
 	case "kill":
 		if a, ok := m.selected(); ok {
 			m.status = "killing " + a.Name + "…"
@@ -168,8 +177,35 @@ func (m Model) keyList(s string, r rune) (tea.Model, tea.Cmd) {
 	case "refresh":
 		m.status = "refreshing…"
 		return m, m.listCmd()
+	case "repair":
+		m.status = "repairing remote connection…"
+		m.spawning = true // reuse the spinner
+		return m, tea.Batch(m.repairCmd(), spinCmd())
+	case "debug":
+		if dbg.Enabled() {
+			m.status = "debug log: " + dbg.Path()
+		} else {
+			m.status = "debug off — set RBG_DEBUG=1 and relaunch to log ssh/claude calls"
+		}
+		return m, nil
 	}
 	return m, nil
+}
+
+// friendlyErr translates an opaque inventory error into a plain-language line
+// with a hint, instead of dumping a raw ssh diagnostic at the user.
+func friendlyErr(err error) string {
+	s := err.Error()
+	switch {
+	case strings.Contains(s, "timed out") || strings.Contains(s, "255"):
+		return "remote unreachable (ssh timed out) — press ^p to repair the connection"
+	case strings.Contains(s, "Permission denied") || strings.Contains(s, "publickey"):
+		return "remote refused the connection (ssh auth) — check your ssh keys / mwinit"
+	case strings.Contains(s, "claude"):
+		return "a machine's `claude` command failed — local agents may be missing (^d for details)"
+	default:
+		return "inventory may be incomplete — ^p repair · ^d details"
+	}
 }
 
 // openSelected opens the selected agent's conversation (local → real client,
@@ -231,15 +267,18 @@ func keyName(k tea.KeyMsg) (string, rune) {
 	case tea.KeyTab:
 		return "cycle", 0
 	// Per-agent actions are ctrl-keys so the list's prompt bar stays free for
-	// typing (g/x/a would otherwise be captured as text).
-	case tea.KeyCtrlG:
-		return "run", 0
+	// typing (x/a would otherwise be captured as text). Reserve/run was removed
+	// from the TUI — agents are spawned (create+run) via the prompt bar.
 	case tea.KeyCtrlX:
 		return "kill", 0
 	case tea.KeyCtrlA:
 		return "adopt", 0
 	case tea.KeyCtrlR:
 		return "refresh", 0
+	case tea.KeyCtrlP:
+		return "repair", 0
+	case tea.KeyCtrlD:
+		return "debug", 0
 	case tea.KeyUp:
 		return "up", 0
 	case tea.KeyDown:

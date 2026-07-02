@@ -122,7 +122,7 @@ func (m Model) viewList() string {
 	}
 	b.WriteString("\n\n" + stSection.Render(label) + m.listPrompt + stHints.Render("▏") + spinner)
 	b.WriteString("\n" + stHints.Render(
-		"type → enter spawns · ↑/↓ move · tab lens · ^g run · ^x kill · ^a adopt · ^r refresh · ^z/q quit"))
+		"type → enter spawns · ↑/↓ move · tab lens · ^x kill · ^a adopt · ^r refresh · ^p repair · ^d debug · ^c quit"))
 	return b.String()
 }
 

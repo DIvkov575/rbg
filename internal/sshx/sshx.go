@@ -93,6 +93,25 @@ func AgentArgs(c *config.Config, verb string, verbArgs []string) []string {
 	return out
 }
 
+// CloseMaster shuts down the SSH ControlMaster for the host, if one is running,
+// via `ssh -O exit`. This is the repair for a wedged multiplex connection: a
+// stale/half-dead master causes the opaque "Connection to UNKNOWN port 65535
+// timed out" errors, and closing it forces the next command to reconnect fresh.
+// Returns nil when mux is off or no master was running (nothing to repair).
+func CloseMaster(c *config.Config, r run.Runner) error {
+	if !c.Mux || userSetControl(c.SSHOpts) {
+		return nil
+	}
+	args := []string{
+		"-o", "ControlPath=" + c.ControlPath,
+		"-O", "exit", c.Host,
+	}
+	// ssh -O exit prints "Exit request sent." on success, or errors if no master
+	// exists — both are fine (either way there's no live master afterward).
+	_, _, err := r.Run("ssh", args, nil)
+	return err
+}
+
 // Reachable runs the connection-gate probe. True iff ssh ... true exits 0.
 func Reachable(c *config.Config, r run.Runner) bool {
 	args := BuildSSHArgs(c, []string{"true"}, Options{Batch: true})
