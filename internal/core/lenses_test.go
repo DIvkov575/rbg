@@ -33,7 +33,7 @@ func TestOnMachine(t *testing.T) {
 }
 
 func TestGroupByProjectSortedWithUnlinkedLast(t *testing.T) {
-	groups := GroupByProject(sampleInventory())
+	groups := GroupByProject(sampleInventory(), nil)
 	// Keys fall back to repo leaf here (no Dir): "app" (2), "lib" (1), "" last.
 	if len(groups) != 3 {
 		t.Fatalf("got %d groups, want 3", len(groups))
@@ -50,21 +50,20 @@ func TestGroupByProjectSortedWithUnlinkedLast(t *testing.T) {
 }
 
 func TestGroupByProjectLinksSameDir(t *testing.T) {
-	// The core linking rule: chats whose working dir is the same project are
-	// linked, even across machines (different absolute roots, same leaf) and
-	// regardless of repo string.
+	// The core linking rule: chats whose working dir is the same project (same
+	// absolute Dir) are linked into one project group.
 	inv := []Agent{
-		{Name: "local-chat", Dir: "/home/me/workplace/rbg", Where: Local},
-		{Name: "remote-chat", Dir: "/desk/workplace/rbg", Where: Remote},
+		{Name: "chat-a", Dir: "/home/me/workplace/rbg", Where: Local},
+		{Name: "chat-b", Dir: "/home/me/workplace/rbg", Where: Local},
 		{Name: "other", Dir: "/home/me/workplace/notes", Where: Local},
 	}
-	groups := GroupByProject(inv)
+	groups := GroupByProject(inv, nil)
 	if len(groups) != 2 {
 		t.Fatalf("got %d groups, want 2 (rbg, notes)", len(groups))
 	}
 	var rbg *ProjectGroup
 	for i := range groups {
-		if groups[i].Project == "rbg" {
+		if groups[i].Project == "/home/me/workplace/rbg" {
 			rbg = &groups[i]
 		}
 	}
@@ -72,7 +71,7 @@ func TestGroupByProjectLinksSameDir(t *testing.T) {
 		t.Fatalf("no 'rbg' project group; got %+v", groups)
 	}
 	if len(rbg.Agents) != 2 {
-		t.Errorf("same-dir-leaf chats across machines should link into one project, got %d", len(rbg.Agents))
+		t.Errorf("same-dir chats should link into one project, got %d", len(rbg.Agents))
 	}
 }
 
@@ -81,7 +80,7 @@ func TestGroupByProjectAgentsSortedByName(t *testing.T) {
 		{Name: "z", Dir: "/w/app"},
 		{Name: "a", Dir: "/w/app"},
 	}
-	groups := GroupByProject(inv)
+	groups := GroupByProject(inv, nil)
 	if groups[0].Agents[0].Name != "a" || groups[0].Agents[1].Name != "z" {
 		t.Errorf("agents not name-sorted within group: %q, %q",
 			groups[0].Agents[0].Name, groups[0].Agents[1].Name)
@@ -89,13 +88,38 @@ func TestGroupByProjectAgentsSortedByName(t *testing.T) {
 }
 
 func TestProjectKeyPrefersDirOverRepo(t *testing.T) {
-	if k := ProjectKey(Agent{Dir: "/home/me/workplace/rbg", Repo: "git@github.com:me/rbg.git"}); k != "rbg" {
-		t.Errorf("ProjectKey with dir = %q, want rbg", k)
+	if k := ProjectKey(Agent{Dir: "/home/me/workplace/rbg", Repo: "git@github.com:me/rbg.git"}); k != "/home/me/workplace/rbg" {
+		t.Errorf("ProjectKey with dir = %q, want /home/me/workplace/rbg", k)
 	}
 	if k := ProjectKey(Agent{Repo: "git@github.com:me/app.git"}); k != "app" {
 		t.Errorf("ProjectKey repo fallback = %q, want app", k)
 	}
 	if k := ProjectKey(Agent{}); k != "" {
 		t.Errorf("ProjectKey with nothing = %q, want empty", k)
+	}
+}
+
+func TestGroupByProjectUsesLinkAndKeepsEmpty(t *testing.T) {
+	agents := []Agent{
+		{Name: "a", ProjectDir: "/w/app", Dir: "/w/app"},
+		{Name: "b", Dir: "/w/lib"}, // no ProjectDir → falls back to Dir
+	}
+	projects := []Project{
+		{Dir: "/w/app", Name: "app"},
+		{Dir: "/w/empty", Name: "empty"}, // zero agents, must still appear
+	}
+	groups := GroupByProject(agents, projects)
+	byName := map[string]int{}
+	for _, g := range groups {
+		byName[g.Project] = len(g.Agents)
+	}
+	if byName["/w/app"] != 1 {
+		t.Errorf("app group = %d, want 1", byName["/w/app"])
+	}
+	if _, ok := byName["/w/empty"]; !ok {
+		t.Error("empty project must render with zero agents")
+	}
+	if byName["/w/lib"] != 1 {
+		t.Errorf("unlisted dir /w/lib should still group by fallback, got %d", byName["/w/lib"])
 	}
 }

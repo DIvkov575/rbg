@@ -57,17 +57,18 @@ const (
 // Agent is the single unit of delegated work. Local vs remote, held vs running
 // vs done, and managed vs foreign are all attributes here, not separate types.
 type Agent struct {
-	Name    string    `json:"name"`    // stable handle (map key in the Store)
-	Repo    string    `json:"repo"`    // git URL / identity; the grouping key
-	Dir     string    `json:"dir"`     // working directory on its host
-	Task    string    `json:"task"`    // the prompt (held agents still have one)
-	Session string    `json:"session"` // claude sessionId once run ("" = never)
-	Where   Location  `json:"where"`
-	State   Lifecycle `json:"state"`
-	Origin  Origin    `json:"origin"`
-	Sync    Sync      `json:"sync"`
-	RunAt   string    `json:"runAt"` // RFC3339 of last run ("" = never)
-	Pid     int       `json:"pid"`   // local child pid for kill (0 for remote; the desktop tracks its own)
+	Name       string    `json:"name"`       // stable handle (map key in the Store)
+	Repo       string    `json:"repo"`       // git URL / identity; the grouping key
+	Dir        string    `json:"dir"`        // working directory on its host
+	ProjectDir string    `json:"projectDir"` // owning project's Dir ("" = fall back to Dir)
+	Task       string    `json:"task"`       // the prompt (held agents still have one)
+	Session    string    `json:"session"`    // claude sessionId once run ("" = never)
+	Where      Location  `json:"where"`
+	State      Lifecycle `json:"state"`
+	Origin     Origin    `json:"origin"`
+	Sync       Sync      `json:"sync"`
+	RunAt      string    `json:"runAt"` // RFC3339 of last run ("" = never)
+	Pid        int       `json:"pid"`   // local child pid for kill (0 for remote; the desktop tracks its own)
 }
 
 // IsHeld reports whether the agent is prepared but not yet launched.

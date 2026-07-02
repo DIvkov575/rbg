@@ -18,17 +18,14 @@ func OnMachine(agents []Agent, where Location) []Agent {
 	return out
 }
 
-// ProjectKey is rbg's internal notion of "which project an agent belongs to",
-// abstracting away the raw repo string and absolute dir. Agents whose work
-// happens in the same directory are the same project — so chats in a single dir
-// are linked by default. The key is the working dir's LEAF name (e.g.
-// /home/me/workplace/rbg → "rbg"), which also links the same project across
-// machines (local ~/workplace/rbg and remote ~/desk/workplace/rbg both → "rbg").
-// Falls back to the repo's leaf when there's no dir, and "" (the "unlinked"
-// bucket) when neither is known.
+// ProjectKey is which project an agent belongs to: its explicit ProjectDir link
+// if set, else its own Dir, else its Repo leaf, else "" (the unlinked bucket).
 func ProjectKey(a Agent) string {
+	if a.ProjectDir != "" {
+		return a.ProjectDir
+	}
 	if a.Dir != "" {
-		return leaf(a.Dir)
+		return a.Dir
 	}
 	if a.Repo != "" {
 		return leaf(a.Repo)
@@ -58,14 +55,20 @@ type ProjectGroup struct {
 	Agents  []Agent
 }
 
-// GroupByProject groups agents by their ProjectKey (working-dir leaf), so chats
-// in the same directory are linked into one project. Groups sort by name, with
-// the unlinked ("") bucket last; agents within a group sort by Name.
-func GroupByProject(agents []Agent) []ProjectGroup {
+// GroupByProject groups agents under their ProjectKey. It takes the known
+// projects so a project with zero agents still renders. Group keys are project
+// Dirs (or fallback keys); groups sort by key with the unlinked "" bucket last;
+// agents within a group sort by Name.
+func GroupByProject(agents []Agent, projects []Project) []ProjectGroup {
 	byKey := map[string][]Agent{}
 	for _, a := range agents {
-		k := ProjectKey(a)
-		byKey[k] = append(byKey[k], a)
+		byKey[ProjectKey(a)] = append(byKey[ProjectKey(a)], a)
+	}
+	// ensure every known project appears, even with no agents.
+	for _, p := range projects {
+		if _, ok := byKey[p.Dir]; !ok {
+			byKey[p.Dir] = nil
+		}
 	}
 	keys := make([]string, 0, len(byKey))
 	for k := range byKey {
@@ -73,7 +76,7 @@ func GroupByProject(agents []Agent) []ProjectGroup {
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		if (keys[i] == "") != (keys[j] == "") {
-			return keys[j] == "" // unlinked bucket sorts last
+			return keys[j] == ""
 		}
 		return keys[i] < keys[j]
 	})
