@@ -263,9 +263,12 @@ func (m Model) openSelected() (tea.Model, tea.Cmd) {
 		m.status = a.Name + " has not run yet (no transcript)"
 		return m, nil
 	}
-	m.pager = newSessionView("session · "+a.Name, a.Name)
+	// Key the session view on the unique Session id, not the Name: claude allows
+	// two bg agents to share a name, so reading/sending by name would fixate on
+	// whichever the engine matches first. The title still shows the name.
+	m.pager = newSessionView("session · "+a.Name, a.Session)
 	m.mode = modePager
-	return m, tea.Batch(m.readCmd(a.Name), spinCmd())
+	return m, tea.Batch(m.readCmd(a.Session), spinCmd())
 }
 
 // spawnFromPrompt launches a background agent for the typed task. The machine is

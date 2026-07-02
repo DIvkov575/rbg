@@ -12,7 +12,7 @@ import (
 // pressing enter feels immediate instead of blocking on the SSH read.
 type pagerModel struct {
 	title   string
-	agent   string   // agent name, for sending follow-ups
+	agent   string   // agent SESSION id (unique) — the read/send key; names aren't unique
 	lines   []string // rendered transcript lines
 	offset  int
 	loading bool   // fetching the transcript

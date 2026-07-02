@@ -107,9 +107,19 @@ func TestEnterOpensSessionViewInstantlyThenFills(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("enter should fire read + spinner commands")
 	}
+	// The session view is keyed on the unique session id, not the name — so the
+	// transcript that fills it is addressed by session id.
+	if m.pager.agent != "S1" {
+		t.Errorf("pager should key on session id S1, got %q", m.pager.agent)
+	}
+	// Draining the batch runs the read; it must target the session id.
+	drainFor(t, cmd, func(msg tea.Msg) bool { _, ok := msg.(transcriptMsg); return ok })
+	if o.readName != "S1" {
+		t.Errorf("Read should be called with the session id S1, got %q", o.readName)
+	}
 	// The batched command produces a transcriptMsg (and a spinTick); feed the
 	// transcript back to fill the view.
-	m2, _ := m.Update(transcriptMsg{name: "job", data: o.readData})
+	m2, _ := m.Update(transcriptMsg{name: "S1", data: o.readData})
 	m = m2.(Model)
 	if m.pager.loading {
 		t.Error("transcript arrival should clear loading")
@@ -147,8 +157,28 @@ func TestSessionViewSendsFollowup(t *testing.T) {
 		_, ok := msg.(sentMsg)
 		return ok
 	})
-	if o.sent != [2]string{"job", "do more"} {
-		t.Errorf("Send got %v, want [job, do more]", o.sent)
+	if o.sent != [2]string{"S1", "do more"} {
+		t.Errorf("Send got %v, want [S1, do more] (keyed on session id)", o.sent)
+	}
+}
+
+// TestOpenResolvesBySessionNotName guards the "selector fixates on one session"
+// bug: claude allows two bg agents to share a name, so opening the second of two
+// same-named rows must read that row's OWN session, not the first match by name.
+func TestOpenResolvesBySessionNotName(t *testing.T) {
+	dup1 := core.Agent{Name: "codec review", Where: core.Remote, State: core.Running, Origin: core.Managed, Session: "SESS-A"}
+	dup2 := core.Agent{Name: "codec review", Where: core.Remote, State: core.Running, Origin: core.Managed, Session: "SESS-B"}
+	o := &recOps{agents: []core.Agent{dup1, dup2}}
+	m := loaded(o)
+	m.cursor = 1 // second row (same name, different session)
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(Model)
+	if m.pager.agent != "SESS-B" {
+		t.Errorf("opening the second same-named row should key on SESS-B, got %q", m.pager.agent)
+	}
+	drainFor(t, cmd, func(msg tea.Msg) bool { _, ok := msg.(transcriptMsg); return ok })
+	if o.readName != "SESS-B" {
+		t.Errorf("Read should target the selected row's session SESS-B, got %q", o.readName)
 	}
 }
 

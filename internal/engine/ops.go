@@ -87,22 +87,33 @@ func (e *Engine) Create(spec core.Agent) (core.Agent, error) {
 // resume appends to the same transcript); find does not need live State for
 // those. Kill signals the recorded pid regardless of live State — the same
 // behavior as before this store-first change.
-func (e *Engine) find(name string) (core.Agent, error) {
-	if rec, ok := e.store.Get(name); ok {
+// find resolves a reference to an agent. ref may be a store name or a live
+// session id: session ids are unique, but agent names are NOT (claude lets two
+// bg agents share a name, e.g. "codec.hpp review"), so callers that need to act
+// on a specific row — the TUI opening/reading/sending a selected agent — pass
+// the session id. A session-id match is tried first for exactly this reason;
+// only if none matches do we fall back to a name match.
+func (e *Engine) find(ref string) (core.Agent, error) {
+	if rec, ok := e.store.Get(ref); ok {
 		return rec, nil
 	}
 	agents, err := e.List()
 	// Note: err may be a degradation error; the inventory is still usable, so we
 	// search it and only surface err if the agent isn't found.
 	for _, a := range agents {
-		if a.Name == name {
+		if a.Session != "" && a.Session == ref {
+			return a, nil
+		}
+	}
+	for _, a := range agents {
+		if a.Name == ref {
 			return a, nil
 		}
 	}
 	if err != nil {
-		return core.Agent{}, fmt.Errorf("agent %q not found (inventory degraded: %w)", name, err)
+		return core.Agent{}, fmt.Errorf("agent %q not found (inventory degraded: %w)", ref, err)
 	}
-	return core.Agent{}, fmt.Errorf("agent %q not found", name)
+	return core.Agent{}, fmt.Errorf("agent %q not found", ref)
 }
 
 // freeName returns a store key not currently in use, derived from base by
