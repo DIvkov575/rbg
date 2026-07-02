@@ -22,7 +22,13 @@ type recOps struct {
 }
 
 func (o *recOps) List() ([]core.Agent, error)             { return o.agents, nil }
-func (o *recOps) Create(a core.Agent) (core.Agent, error) { o.created = a; return a, nil }
+func (o *recOps) Create(a core.Agent) (core.Agent, error) {
+	o.created = a
+	if a.Name == "" { // mirror the engine deriving a name from the task
+		a.Name = "derived-" + a.Task
+	}
+	return a, nil
+}
 func (o *recOps) Run(n string) error                      { o.ran = n; return nil }
 func (o *recOps) Send(n, t string) error                  { o.sent = [2]string{n, t}; return nil }
 func (o *recOps) Read(n string) ([]byte, error)           { o.readName = n; return o.readData, nil }
@@ -63,9 +69,9 @@ func TestAgentsMsgPopulatesAndClamps(t *testing.T) {
 func TestRunKeyDispatchesRunCmd(t *testing.T) {
 	o := &recOps{agents: []core.Agent{remote("job")}}
 	m := loaded(o)
-	_, cmd := stepRune(m, 'g')
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG}) // ^g = run
 	if cmd == nil {
-		t.Fatal("g should return a run command")
+		t.Fatal("ctrl-g should return a run command")
 	}
 	msg := cmd() // execute the async cmd
 	if o.ran != "job" {
@@ -187,120 +193,99 @@ func typeStr(m Model, s string) Model {
 	return m
 }
 
-func TestCreateFlowPicksProjectThenTask(t *testing.T) {
-	// n opens the project picker; choosing a project then asks for the task; the
-	// engine auto-derives the name. Picker index 0 is "(no repo)", index 1 is the
-	// first suggestion.
-	o := &recOps{projects: []core.Project{{Label: "app (local)", Repo: "/w/app", Origin: "local"}}}
-	m := loaded(o)
-	m, _ = stepRune(m, 'n')
-	if m.mode != modePicker {
-		t.Fatalf("n should open the project picker, mode=%d", m.mode)
+func TestPromptBarSpawnsInSelectedProject(t *testing.T) {
+	// Typing into the list prompt bar and pressing enter spawns (create+run) a
+	// background agent in the selected agent's project on the view's machine.
+	sel := core.Agent{Name: "existing", Where: core.Remote, State: core.Running, Origin: core.Managed,
+		Repo: "git@github.com:me/app.git", Dir: "/desk/workplace/app", Session: "S1"}
+	o := &recOps{agents: []core.Agent{sel}}
+	m := loaded(o) // default view = remote; cursor on the one agent
+	m = typeStr(m, "add a feature")
+	if m.listPrompt != "add a feature" {
+		t.Fatalf("prompt bar should capture typing, got %q", m.listPrompt)
 	}
-	// move to the first real suggestion (index 1) and choose it
-	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mm.(Model)
-	m, _ = enterKey(m)
-	if m.mode != modeInput {
-		t.Fatalf("choosing a project should advance to the task input, mode=%d", m.mode)
+	if !m.spawning {
+		t.Error("enter with a prompt should set spawning")
 	}
-	m = typeStr(m, "do the thing")
-	m, cmd := enterKey(m)
+	if m.listPrompt != "" {
+		t.Error("prompt should clear after spawn")
+	}
 	if cmd == nil {
-		t.Fatal("final enter should dispatch a create command")
+		t.Fatal("spawn should dispatch a command")
 	}
-	cmd()
-	if o.created.Repo != "/w/app" || o.created.Task != "do the thing" {
-		t.Errorf("created spec wrong: %+v", o.created)
+	drainFor(t, cmd, func(msg tea.Msg) bool { _, ok := msg.(spawnedMsg); return ok })
+	// created spec: task from prompt, project (repo+dir) + machine from selection
+	if o.created.Task != "add a feature" {
+		t.Errorf("spawn task = %q, want 'add a feature'", o.created.Task)
 	}
-	if o.created.Name != "" {
-		t.Errorf("UI should not set a name (engine derives it), got %q", o.created.Name)
+	if o.created.Repo != sel.Repo || o.created.Dir != sel.Dir {
+		t.Errorf("spawn should link to the selected project (%q/%q), got %q/%q",
+			sel.Repo, sel.Dir, o.created.Repo, o.created.Dir)
 	}
-	if m.mode != modeList {
-		t.Errorf("create should return to the list, mode=%d", m.mode)
+	if o.created.Where != core.Remote {
+		t.Errorf("remote view spawn should target remote, got %q", o.created.Where)
 	}
-}
-
-func TestCreateNoRepoOption(t *testing.T) {
-	// Choosing the first picker entry ("no repo") yields a repo-less create.
-	o := &recOps{projects: []core.Project{{Label: "app (local)", Repo: "/w/app"}}}
-	m := loaded(o)
-	m, _ = stepRune(m, 'n')
-	m, _ = enterKey(m) // cursor at 0 = "(no repo)"
-	if m.mode != modeInput {
-		t.Fatalf("no-repo choice should advance to the task input, mode=%d", m.mode)
-	}
-	m = typeStr(m, "just a task")
-	m, cmd := enterKey(m)
-	cmd()
-	if o.created.Repo != "" || o.created.Task != "just a task" {
-		t.Errorf("no-repo create wrong: %+v", o.created)
+	// and it was RUN (spawn = create + run)
+	if o.ran == "" {
+		t.Error("spawn should also run the created agent")
 	}
 }
 
-func TestPickerFilters(t *testing.T) {
-	o := &recOps{projects: []core.Project{
-		{Label: "alpha (local)", Repo: "/w/alpha"},
-		{Label: "beta (github)", Repo: "me/beta"},
-	}}
+func TestPromptBarMachineFollowsView(t *testing.T) {
+	sel := core.Agent{Name: "x", Where: core.Remote, State: core.Running, Origin: core.Managed}
+	o := &recOps{agents: []core.Agent{sel, {Name: "loc", Where: core.Local, State: core.Running, Origin: core.Managed}}}
 	m := loaded(o)
-	m, _ = stepRune(m, 'n')
-	m = typeStr(m, "beta") // filter
-	matches := m.picker.matches()
-	// "(no repo)" always matches + "beta" → 2
-	if len(matches) != 2 {
-		t.Fatalf("filter 'beta' should match no-repo + beta, got %d: %+v", len(matches), matches)
-	}
-	m, _ = enterKey(m) // cursor 0 = no-repo (still first); choose beta explicitly
-	// after filtering, choose the beta row: move down then enter
-	// (re-open to test choosing the filtered suggestion)
-	m2 := loaded(o)
-	m2, _ = stepRune(m2, 'n')
-	m2 = typeStr(m2, "beta")
-	mm, _ := m2.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m2 = mm.(Model)
-	m2, _ = enterKey(m2)
-	m2 = typeStr(m2, "t")
-	_, cmd := enterKey(m2)
-	cmd()
-	if o.created.Repo != "me/beta" {
-		t.Errorf("filtered choice should pick me/beta, got %q", o.created.Repo)
+	m.view = viewLocal // local lens → spawn should target local
+	m.clampCursor()
+	m = typeStr(m, "task")
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	drainFor(t, cmd, func(msg tea.Msg) bool { _, ok := msg.(spawnedMsg); return ok })
+	if o.created.Where != core.Local {
+		t.Errorf("local view spawn should target local, got %q", o.created.Where)
 	}
 }
 
-func TestCreateEmptyTaskStays(t *testing.T) {
-	o := &recOps{}
+func TestEmptyPromptEnterOpensSelectedInstead(t *testing.T) {
+	// With an empty prompt, enter opens the selected agent (no spawn).
+	sel := core.Agent{Name: "job", Where: core.Remote, State: core.Running, Origin: core.Managed, Session: "S1"}
+	o := &recOps{agents: []core.Agent{sel}}
 	m := loaded(o)
-	m, _ = stepRune(m, 'n')     // picker
-	m, _ = enterKey(m)          // choose no-repo → task input
-	mm, cmd := enterKey(m)      // empty task
-	m = mm
-	if cmd != nil {
-		t.Error("empty task should not dispatch")
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(Model)
+	if m.spawning {
+		t.Error("empty prompt should not spawn")
 	}
-	if m.mode != modeInput {
-		t.Errorf("empty task should stay on the task input, mode=%d", m.mode)
+	if m.mode != modePager {
+		t.Errorf("empty-prompt enter should open the selected agent's session view, mode=%d", m.mode)
 	}
 }
 
 func TestTabCyclesLens(t *testing.T) {
 	o := &recOps{agents: []core.Agent{remote("a")}}
 	m := loaded(o)
-	// Default is combined (so local + remote agents are visible on open).
-	if m.view != viewCombined {
-		t.Fatalf("initial view = %v, want combined", m.view)
+	// Default is the remote lens; tab cycles remote → local → projects.
+	if m.view != viewRemote {
+		t.Fatalf("initial view = %v, want remote", m.view)
 	}
 	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = mm.(Model)
+	if m.view != viewLocal {
+		t.Errorf("tab from remote should advance to local, got %v", m.view)
+	}
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = mm.(Model)
 	if m.view != viewProject {
-		t.Errorf("tab from combined should advance to project, got %v", m.view)
+		t.Errorf("tab from local should advance to projects, got %v", m.view)
 	}
 }
 
 func TestQuitKey(t *testing.T) {
 	o := &recOps{}
 	m := loaded(o)
-	_, cmd := stepRune(m, 'q')
+	// q is now typed into the prompt bar; quit is ctrl-c.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if cmd == nil {
 		t.Fatal("q should return a quit command")
 	}
@@ -313,13 +298,13 @@ func TestQuitKey(t *testing.T) {
 func TestAdoptOnlyForeign(t *testing.T) {
 	o := &recOps{agents: []core.Agent{{Name: "mine", Where: core.Remote, State: core.Running, Origin: core.Managed}}}
 	m := loaded(o)
-	_, cmd := stepRune(m, 'A') // managed agent → no adopt
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA}) // ^a; managed agent → no adopt
 	if cmd != nil {
 		t.Error("adopt on a managed agent should do nothing")
 	}
 	o2 := &recOps{agents: []core.Agent{{Name: "wild", Where: core.Remote, State: core.Running, Origin: core.Foreign}}}
 	m2 := loaded(o2)
-	_, cmd2 := stepRune(m2, 'A')
+	_, cmd2 := m2.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
 	if cmd2 == nil {
 		t.Fatal("adopt on a foreign agent should dispatch")
 	}

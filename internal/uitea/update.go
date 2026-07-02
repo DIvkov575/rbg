@@ -59,11 +59,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pager.loading = true
 		return m, m.readCmd(msg.name)
 
+	case spawnedMsg:
+		m.spawning = false
+		if msg.err != nil {
+			m.status = "spawn failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.status = "spawned " + msg.name
+		return m, m.listCmd() // refresh so the new agent appears
+
 	case spinTick:
-		// Advance the spinner only while something is in flight and we're in the
-		// session view; otherwise let it stop (no re-tick).
-		if m.mode == modePager && (m.pager.loading || m.pager.sending) {
+		// Advance the spinner while something is in flight: the session view's
+		// load/send, or a list-view spawn. Otherwise let it stop (no re-tick).
+		busy := (m.mode == modePager && (m.pager.loading || m.pager.sending)) || m.spawning
+		if busy {
 			m.pager.spin = (m.pager.spin + 1) % len(spinnerFrames)
+			m.spin = (m.spin + 1) % len(spinnerFrames)
 			return m, spinCmd()
 		}
 		return m, nil
@@ -87,8 +98,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	switch m.mode {
-	case modeInput:
-		return m.keyInput(s, r)
 	case modePager:
 		p, act := m.pager.key(s, r, m.h)
 		m.pager = p
@@ -104,123 +113,109 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.sendFollowupCmd(m.pager.agent, task), spinCmd())
 		}
 		return m, nil
-	case modePicker:
-		return m.keyPicker(s, r)
 	default:
 		return m.keyList(s, r)
 	}
 }
 
-// keyList handles keys on the agents list.
+// keyList handles keys on the agents list. The prompt bar is always focused for
+// typing (printable runes append to it); enter with a non-empty prompt SPAWNS a
+// background agent in the selected project, else opens the selected row. Nav is
+// arrows; per-agent actions are ctrl-keys so they don't collide with typing.
 func (m Model) keyList(s string, r rune) (tea.Model, tea.Cmd) {
-	switch {
-	case s == "quit" || (s == "rune" && r == 'q'):
+	switch s {
+	case "quit":
 		return m, tea.Quit
-	case s == "cycle" || s == "tab" || (s == "rune" && r == '\t'):
+	case "cycle": // tab / ctrl-s
 		m.view = m.view.next()
 		m.clampCursor()
 		return m, nil
-	case s == "up" || (s == "rune" && r == 'k'):
+	case "up":
 		m.cursor--
 		m.clampCursor()
 		return m, nil
-	case s == "down" || (s == "rune" && r == 'j'):
+	case "down":
 		m.cursor++
 		m.clampCursor()
 		return m, nil
-	case s == "enter":
-		if a, ok := m.selected(); ok {
-			// A LOCAL conversation opens the real interactive claude client (no
-			// custom render). A remote one opens the session view IMMEDIATELY in a
-			// loading state and fetches the transcript in the background, so enter
-			// feels instant instead of blocking on the SSH read; a spinner ticks
-			// until it arrives.
-			if a.Where == core.Local && a.Session != "" {
-				return m, m.openClientCmd(a)
-			}
-			if a.Session == "" {
-				m.status = a.Name + " has not run yet (no transcript)"
-				return m, nil
-			}
-			m.pager = newSessionView("session · "+a.Name, a.Name)
-			m.mode = modePager
-			return m, tea.Batch(m.readCmd(a.Name), spinCmd())
+	case "backspace":
+		if n := len(m.listPrompt); n > 0 {
+			m.listPrompt = m.listPrompt[:n-1]
 		}
 		return m, nil
-	case s == "rune":
-		return m.keyListRune(r)
-	}
-	return m, nil
-}
-
-// keyListRune handles action letters on the list.
-func (m Model) keyListRune(r rune) (tea.Model, tea.Cmd) {
-	switch r {
-	case 'r':
-		m.status = "refreshing…"
-		return m, m.listCmd()
-	case 'g': // go: run
+	case "rune":
+		m.listPrompt += string(r)
+		return m, nil
+	case "enter":
+		if strings.TrimSpace(m.listPrompt) != "" {
+			return m.spawnFromPrompt()
+		}
+		return m.openSelected()
+	case "run":
 		if a, ok := m.selected(); ok {
 			m.status = "running " + a.Name + "…"
 			return m, m.runCmd(a.Name)
 		}
-	case 'x': // kill
+	case "kill":
 		if a, ok := m.selected(); ok {
 			m.status = "killing " + a.Name + "…"
 			return m, m.killCmd(a.Name)
 		}
-	case 'A': // adopt (foreign only)
+	case "adopt":
 		if a, ok := m.selected(); ok && a.IsForeign() {
 			return m, m.adoptCmd(a.Name)
 		}
-	case 's': // send: compose a follow-up
-		if a, ok := m.selected(); ok {
-			m.input = newSendInput(a.Name)
-			m.mode = modeInput
+	case "refresh":
+		m.status = "refreshing…"
+		return m, m.listCmd()
+	}
+	return m, nil
+}
+
+// openSelected opens the selected agent's conversation (local → real client,
+// remote → session view).
+func (m Model) openSelected() (tea.Model, tea.Cmd) {
+	a, ok := m.selected()
+	if !ok {
+		return m, nil
+	}
+	if a.Where == core.Local && a.Session != "" {
+		return m, m.openClientCmd(a)
+	}
+	if a.Session == "" {
+		m.status = a.Name + " has not run yet (no transcript)"
+		return m, nil
+	}
+	m.pager = newSessionView("session · "+a.Name, a.Name)
+	m.mode = modePager
+	return m, tea.Batch(m.readCmd(a.Name), spinCmd())
+}
+
+// spawnFromPrompt launches a background agent for the typed task. The machine is
+// the view's machine (remote/local); in the project view it follows the selected
+// agent. The project (repo+dir) is taken from the selected agent so the new chat
+// links to the selected project.
+func (m Model) spawnFromPrompt() (tea.Model, tea.Cmd) {
+	task := strings.TrimSpace(m.listPrompt)
+	sel, hasSel := m.selected()
+
+	where, ok := m.view.machine()
+	if !ok { // project view: follow the selected agent
+		if hasSel {
+			where = sel.Where
+		} else {
+			where = core.Remote
 		}
-	case 'n': // new: pick a project first, then compose the task
-		m.picker = newPicker(m.ops.Projects())
-		m.mode = modePicker
 	}
-	return m, nil
-}
-
-// keyPicker handles keys in the project picker. On a choice it stores the repo
-// and advances to the task prompt; Esc cancels the create flow.
-func (m Model) keyPicker(s string, r rune) (tea.Model, tea.Cmd) {
-	pk, done, result := m.picker.key(s, r)
-	m.picker = pk
-	if !done {
-		return m, nil
+	spec := core.Agent{Task: task, Where: where}
+	if hasSel {
+		spec.Repo = sel.Repo // link to the selected agent's project
+		spec.Dir = sel.Dir
 	}
-	if res, ok := result.(pickerDone); ok {
-		m.input = newCreateInput(res.repo) // repo chosen; now collect the task
-		m.mode = modeInput
-	} else {
-		m.mode = modeList // cancelled
-	}
-	return m, nil
-}
-
-// keyInput handles keys in the create/send overlay, dispatching the engine
-// command when the flow completes.
-func (m Model) keyInput(s string, r rune) (tea.Model, tea.Cmd) {
-	in, done, result := m.input.key(s, r)
-	m.input = in
-	if !done {
-		return m, nil
-	}
-	m.mode = modeList
-	switch res := result.(type) {
-	case createDone:
-		m.status = "creating " + res.spec.Name + "…"
-		return m, m.createCmd(res.spec)
-	case sendDone:
-		m.status = "sending to " + res.target + "…"
-		return m, m.sendCmd(res.target, res.task)
-	default: // cancelled
-		return m, nil
-	}
+	m.listPrompt = ""
+	m.spawning = true
+	m.status = "spawning agent…"
+	return m, tea.Batch(m.spawnCmd(spec), spinCmd())
 }
 
 // keyName maps a Bubble Tea key to a compact (name, rune) pair the sub-models
@@ -235,6 +230,16 @@ func keyName(k tea.KeyMsg) (string, rune) {
 		return "cycle", 0
 	case tea.KeyTab:
 		return "cycle", 0
+	// Per-agent actions are ctrl-keys so the list's prompt bar stays free for
+	// typing (g/x/a would otherwise be captured as text).
+	case tea.KeyCtrlG:
+		return "run", 0
+	case tea.KeyCtrlX:
+		return "kill", 0
+	case tea.KeyCtrlA:
+		return "adopt", 0
+	case tea.KeyCtrlR:
+		return "refresh", 0
 	case tea.KeyUp:
 		return "up", 0
 	case tea.KeyDown:

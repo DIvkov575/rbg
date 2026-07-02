@@ -35,12 +35,8 @@ var (
 // View renders the whole dashboard for the current mode.
 func (m Model) View() string {
 	switch m.mode {
-	case modeInput:
-		return m.viewInput()
 	case modePager:
 		return m.viewPager()
-	case modePicker:
-		return m.viewPicker()
 	default:
 		return m.viewList()
 	}
@@ -75,7 +71,7 @@ func syncTag(s core.Sync) string {
 
 // tabsBar renders the lens tabs with the active one highlighted.
 func (m Model) tabsBar() string {
-	names := []viewMode{viewCombined, viewProject}
+	names := []viewMode{viewRemote, viewLocal, viewProject}
 	var parts []string
 	for _, v := range names {
 		if v == m.view {
@@ -110,16 +106,46 @@ func (m Model) viewList() string {
 	switch m.view {
 	case viewProject:
 		b.WriteString(m.projectRows(nameW))
-	default: // combined
-		b.WriteString(m.sectionedRows(nameW))
+	default: // remote / local — a flat machine-filtered table
+		b.WriteString(m.rows(m.visible(), 0, nameW))
 	}
 
 	if m.status != "" {
-		b.WriteString("\n" + stStatus.Render(m.status) + "\n")
+		b.WriteString("\n" + stStatus.Render(m.status))
 	}
+
+	// Prompt bar: spawns a background agent in the selected project on enter.
+	label := "spawn in " + m.spawnTargetLabel() + " › "
+	spinner := ""
+	if m.spawning {
+		spinner = " " + lipgloss.NewStyle().Foreground(cActive).Render(spinnerFrames[m.spin%len(spinnerFrames)])
+	}
+	b.WriteString("\n\n" + stSection.Render(label) + m.listPrompt + stHints.Render("▏") + spinner)
 	b.WriteString("\n" + stHints.Render(
-		"↑/↓ move · tab lens · enter read · g run · s send · x kill · A adopt · n new · r refresh · q quit"))
+		"type → enter spawns · ↑/↓ move · tab lens · ^g run · ^x kill · ^a adopt · ^r refresh · ^z/q quit"))
 	return b.String()
+}
+
+// spawnTargetLabel describes where the prompt bar will spawn: the selected
+// agent's project on the view's machine (remote/local), or the selected agent's
+// machine in the project view.
+func (m Model) spawnTargetLabel() string {
+	sel, has := m.selected()
+	proj := "no project"
+	if has {
+		if k := core.ProjectKey(sel); k != "" {
+			proj = k
+		}
+	}
+	where, ok := m.view.machine()
+	if !ok {
+		if has {
+			where = sel.Where
+		} else {
+			where = core.Remote
+		}
+	}
+	return string(where) + "/" + proj
 }
 
 func (m Model) tableHeader(nameW int) string {
@@ -154,17 +180,6 @@ func (m Model) rows(agents []core.Agent, base, nameW int) string {
 	return b.String()
 }
 
-func (m Model) sectionedRows(nameW int) string {
-	var b strings.Builder
-	local := core.OnMachine(m.agents, core.Local)
-	remote := core.OnMachine(m.agents, core.Remote)
-	b.WriteString(stSection.Render("LOCAL") + "\n")
-	b.WriteString(m.rows(local, 0, nameW))
-	b.WriteString(stSection.Render("REMOTE") + "\n")
-	b.WriteString(m.rows(remote, len(local), nameW))
-	return b.String()
-}
-
 func (m Model) projectRows(nameW int) string {
 	groups := core.GroupByProject(m.agents)
 	if len(groups) == 0 {
@@ -181,51 +196,6 @@ func (m Model) projectRows(nameW int) string {
 		b.WriteString(m.rows(g.Agents, base, nameW))
 		base += len(g.Agents)
 	}
-	return b.String()
-}
-
-// viewInput renders the create/send overlay in a bordered box.
-func (m Model) viewInput() string {
-	body := fmt.Sprintf("%s\n\n> %s", stSection.Render(m.input.prompt()), m.input.buf)
-	box := stBox.Width(clamp(m.contentWidth()-4, 30, 80)).Render(body)
-	return box + "\n" + stHints.Render("type · enter next/submit · esc cancel")
-}
-
-// viewPicker renders the project chooser: a filter line and a scrollable list
-// of matching projects, the selected one highlighted, origin-colored.
-func (m Model) viewPicker() string {
-	var b strings.Builder
-	b.WriteString(stTitle.Render("Pick a project for the new agent") + "\n")
-	b.WriteString(stHints.Render("filter: "+m.picker.filter+"▏") + "\n\n")
-
-	matches := m.picker.matches()
-	// Window the list to the terminal height so long lists scroll around the cursor.
-	win := m.h - 6
-	if win < 3 {
-		win = 3
-	}
-	start := 0
-	if m.picker.cursor >= win {
-		start = m.picker.cursor - win + 1
-	}
-	end := start + win
-	if end > len(matches) {
-		end = len(matches)
-	}
-	for i := start; i < end; i++ {
-		p := matches[i]
-		line := "  " + p.Label
-		if i == m.picker.cursor {
-			line = stSelected.Render("▸ " + p.Label)
-		} else {
-			line = stRow.Render(line)
-		}
-		b.WriteString(line + "\n")
-	}
-	if len(matches) == 0 {
-		b.WriteString(stHints.Render("  (no matches)") + "\n")
-	}
-	b.WriteString("\n" + stHints.Render("type to filter · ↑/↓ move · enter choose · esc cancel"))
 	return b.String()
 }
 

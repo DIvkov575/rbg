@@ -31,10 +31,8 @@ type Ops interface {
 type mode int
 
 const (
-	modeList   mode = iota // the agents list
-	modeInput              // composing a create or send (task text)
-	modePager              // reading a transcript
-	modePicker             // choosing a project for a new agent
+	modeList  mode = iota // the agents list (with the spawn prompt bar)
+	modePager             // the remote session view (transcript + prompt bar)
 )
 
 // --- messages (results of async engine work) ---
@@ -65,26 +63,34 @@ type sentMsg struct {
 // spinTick advances the processing spinner.
 type spinTick struct{}
 
+// spawnedMsg reports a prompt-bar spawn (create+run) completed.
+type spawnedMsg struct {
+	name string
+	err  error
+}
+
 // Model is the whole dashboard state.
 type Model struct {
 	ops    Ops
 	agents []core.Agent
 	cursor int
-	view   viewMode // which lens (remote/local/combined/project)
+	view   viewMode // which lens (remote/local/project)
 	w, h   int
 	status string
 	mode   mode
 
-	input  inputModel
-	pager  pagerModel
-	picker pickerModel
+	listPrompt string // the list view's prompt bar (spawns a bg agent on enter)
+	spawning   bool   // a spawn is in flight (spinner)
+	spin       int    // spinner frame
+
+	pager pagerModel
 }
 
 // New builds a dashboard model over ops.
 func New(ops Ops) Model {
-	// Default to the combined lens (everything, both machines). The old
-	// remote-only / local-only individual lenses were removed.
-	return Model{ops: ops, view: viewCombined}
+	// Default to the remote lens (the primary use case: delegating to the
+	// desktop). tab cycles remote → local → projects.
+	return Model{ops: ops, view: viewRemote}
 }
 
 // Init kicks off the first inventory load.
@@ -165,6 +171,22 @@ func (m Model) sendFollowupCmd(name, task string) tea.Cmd {
 	ops := m.ops
 	return func() tea.Msg {
 		return sentMsg{name: name, err: ops.Send(name, task)}
+	}
+}
+
+// spawnCmd creates a held agent from spec and immediately runs it — a one-shot
+// "spawn a background agent" from the list prompt bar. Yields a spawnedMsg.
+func (m Model) spawnCmd(spec core.Agent) tea.Cmd {
+	ops := m.ops
+	return func() tea.Msg {
+		created, err := ops.Create(spec)
+		if err != nil {
+			return spawnedMsg{err: err}
+		}
+		if err := ops.Run(created.Name); err != nil {
+			return spawnedMsg{name: created.Name, err: err}
+		}
+		return spawnedMsg{name: created.Name}
 	}
 }
 
